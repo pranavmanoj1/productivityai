@@ -52,8 +52,9 @@ const Chat: React.FC = () => {
   const playNextTTS = async (message: string) => {
     setIsSpeaking(true);
     try {
+      const backendUrl = process.env.REACT_APP_BACKEND_URL;
       const response = await axios.post(
-        'http://localhost:5001/api/tts',
+        `${backendUrl}/api/tts`,
         { text: message },
         { responseType: 'arraybuffer' }
       );
@@ -111,7 +112,8 @@ const Chat: React.FC = () => {
     setInput('');
 
     try {
-      const response = await axios.post('http://localhost:5001/api/ai-response', {
+      const backendUrl = process.env.REACT_APP_BACKEND_URL;
+      const response = await axios.post(`${backendUrl}/api/tts`, {
         message: currentInput,
       });
       const aiResponse: string = response.data.response;
