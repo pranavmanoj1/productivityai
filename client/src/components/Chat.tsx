@@ -102,7 +102,8 @@ const Chat: React.FC = () => {
   };
 
   /**
-   * Send user input to the server and get AI response
+   * Send user input to the server and get AI response.
+   * Note: We're now calling the `/api/ai-response` endpoint.
    */
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -113,7 +114,7 @@ const Chat: React.FC = () => {
 
     try {
       const backendUrl = process.env.REACT_APP_BACKEND_URL;
-      const response = await axios.post(`${backendUrl}/api/tts`, {
+      const response = await axios.post(`${backendUrl}/api/ai-response`, {
         message: currentInput,
       });
       const aiResponse: string = response.data.response;
@@ -181,9 +182,7 @@ const Chat: React.FC = () => {
     }
     if (isOnCall && checkInEnabled) {
       const intervalId = window.setInterval(() => {
-        addAIMessage(
-          "Just checking in—how are you doing?"
-        );
+        addAIMessage("Just checking in—how are you doing?");
       }, checkInMinutes * 60 * 1000);
 
       checkInIntervalRef.current = intervalId;
