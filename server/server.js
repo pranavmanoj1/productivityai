@@ -15,6 +15,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+
+// Root endpoint to guide users
+app.get('/', (req, res) => {
+  res.send(
+    "Server is running. If you intended to call one of your API endpoints, make sure you're using the correct path (like /api/ai-response or /api/tts)."
+  );
+});
+
 // --- Existing endpoint for AI responses (OpenAI) ---
 app.post('/api/ai-response', async (req, res) => {
   const { message } = req.body;
