@@ -55,7 +55,7 @@ const Chat: React.FC = () => {
       const backendUrl = process.env.REACT_APP_BACKEND_URL;
       console.log(backendUrl)
       const response = await axios.post(
-        `${backendUrl}/api/tts`,
+        'https://productivityai.onrender.com/api/tts',
         { text: message },
         { responseType: 'arraybuffer' }
       );
@@ -115,7 +115,7 @@ const Chat: React.FC = () => {
 
     try {
       const backendUrl = process.env.REACT_APP_BACKEND_URL;
-      const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
+      const response = await axios.post('https://productivityai.onrender.comloc/api/ai-response', {
         message: currentInput,
       });
       const aiResponse: string = response.data.response;
