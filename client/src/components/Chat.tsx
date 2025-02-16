@@ -53,6 +53,7 @@ const Chat: React.FC = () => {
     setIsSpeaking(true);
     try {
       const backendUrl = process.env.REACT_APP_BACKEND_URL;
+      console.log(backendUrl)
       const response = await axios.post(
         `${backendUrl}/api/tts`,
         { text: message },
@@ -114,7 +115,7 @@ const Chat: React.FC = () => {
 
     try {
       const backendUrl = process.env.REACT_APP_BACKEND_URL;
-      const response = await axios.post(`${backendUrl}/api/ai-response`, {
+      const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
         message: currentInput,
       });
       const aiResponse: string = response.data.response;
