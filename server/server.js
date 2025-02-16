@@ -4,8 +4,6 @@ const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
 
-
-
 // 1) Import the Google TTS library
 const textToSpeech = require('@google-cloud/text-to-speech');
 
@@ -14,7 +12,6 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
-
 
 // Root endpoint to guide users
 app.get('/', (req, res) => {
@@ -31,9 +28,7 @@ app.post('/api/ai-response', async (req, res) => {
       'https://api.openai.com/v1/chat/completions',
       {
         model: "gpt-3.5-turbo",
-        messages: [
-          { role: "user", content: message }
-        ],
+        messages: [{ role: "user", content: message }],
         max_tokens: 150,
         temperature: 0.7,
         top_p: 1,
@@ -57,9 +52,16 @@ app.post('/api/ai-response', async (req, res) => {
   }
 });
 
-// 2) Create a TTS client instance
-//    Make sure your GOOGLE_APPLICATION_CREDENTIALS is pointing to the JSON key
-const ttsClient = new textToSpeech.TextToSpeechClient();
+// 2) Create a TTS client instance using credentials from an environment variable
+// Instead of relying on a local file via GOOGLE_APPLICATION_CREDENTIALS,
+// we load the JSON key content from the environment variable GOOGLE_CLOUD_TTS_CREDENTIALS.
+const credentials = process.env.GOOGLE_CLOUD_TTS_CREDENTIALS
+  ? JSON.parse(process.env.GOOGLE_CLOUD_TTS_CREDENTIALS)
+  : null;
+
+const ttsClient = new textToSpeech.TextToSpeechClient({
+  ...(credentials && { credentials }),
+});
 
 // 3) TTS endpoint
 app.post('/api/tts', async (req, res) => {
@@ -87,9 +89,14 @@ app.post('/api/tts', async (req, res) => {
       return res.status(500).send('No audio content received');
     }
 
-    // 4) Send the audio content as MP3
+    // If the returned audio is Base64-encoded, convert it to a Buffer
+    const audioBuffer = typeof response.audioContent === 'string'
+      ? Buffer.from(response.audioContent, 'base64')
+      : response.audioContent;
+
+    // Send the audio content as MP3
     res.set('Content-Type', 'audio/mpeg');
-    res.send(response.audioContent);
+    res.send(audioBuffer);
   } catch (err) {
     console.error('Error calling TTS:', err);
     res.status(500).json({ error: 'Failed to synthesize speech' });
