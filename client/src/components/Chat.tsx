@@ -115,7 +115,7 @@ const Chat: React.FC = () => {
 
     try {
       const backendUrl = process.env.REACT_APP_BACKEND_URL;
-      const response = await axios.post('https://productivityai.onrender.comloc/api/ai-response', {
+      const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
         message: currentInput,
       });
       const aiResponse: string = response.data.response;
