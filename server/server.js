@@ -145,7 +145,7 @@ No other top-level keys.`
             // Make an *internal* call to our own TTS endpoint
             // We'll request "arraybuffer" so we get raw binary data back
             const ttsResponse = await axios.post(
-              `http://localhost:${process.env.PORT || 5001}/api/tts`,
+              `https://productivityai.onrender.com/api/tts/`,
               { text: "Task added" },
               { responseType: 'arraybuffer' }
             );
