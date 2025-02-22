@@ -55,7 +55,7 @@ const Chat: React.FC = () => {
       
    
       const response = await axios.post(
-        'https://productivityai.onrender.com/api/tts/api/tts',
+        'https://productivityai.onrender.com/api/tts',
         { text: message },
         { responseType: 'arraybuffer' }
       );
@@ -115,7 +115,7 @@ const Chat: React.FC = () => {
 
     try {
       
-      const response = await axios.post('https://productivityai.onrender.com/api/tts', {
+      const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
         message: currentInput,
       });
       const aiResponse: string = response.data.freeform_answer;
