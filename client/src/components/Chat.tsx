@@ -55,7 +55,7 @@ const Chat: React.FC = () => {
       
    
       const response = await axios.post(
-        'https://productivityai.onrender.com/api/tts',
+        'https://productivityai.onrender.com/api/tts/api/tts',
         { text: message },
         { responseType: 'arraybuffer' }
       );
@@ -114,11 +114,11 @@ const Chat: React.FC = () => {
     setInput('');
 
     try {
-      const backendUrl = process.env.REACT_APP_BACKEND_URL;
-      const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
+      
+      const response = await axios.post('https://productivityai.onrender.com/api/tts', {
         message: currentInput,
       });
-      const aiResponse: string = response.data.response;
+      const aiResponse: string = response.data.freeform_answer;
       addAIMessage(aiResponse);
     } catch (error) {
       console.error(error);
