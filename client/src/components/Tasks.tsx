@@ -1,13 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, CheckCircle, Circle, Calendar, Clock } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { format, parseISO } from 'date-fns';
+import CalendarView from './CalendarView';
+
+interface Task {
+  id: string;
+  title: string;
+  completed: boolean;
+  priority: string;
+  due_date: string | null;
+  due_time: string | null;
+}
 
 const Tasks = () => {
-  const [tasks, setTasks] = useState([
-    { id: 1, title: 'Complete project proposal', completed: false, priority: 'high', dueDate: null, dueTime: null },
-    { id: 2, title: 'Review team presentations', completed: true, priority: 'medium', dueDate: null, dueTime: null },
-    { id: 3, title: 'Update weekly report', completed: false, priority: 'high', dueDate: null, dueTime: null },
-  ]);
-
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [showAddTask, setShowAddTask] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState('medium');
@@ -15,8 +22,29 @@ const Tasks = () => {
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const parseTimeFromTitle = (title) => {
+  useEffect(() => {
+    fetchTasks();
+  }, []);
+
+  const fetchTasks = async () => {
+    try {
+      const { data: tasks, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setTasks(tasks || []);
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const parseTimeFromTitle = (title: string) => {
     const timeRegex = /at\s+(\d{1,2})(?::\d{2})?\s*(pm|am)?/i;
     const match = title.match(timeRegex);
     
@@ -30,7 +58,6 @@ const Tasks = () => {
       const now = new Date();
       let suggestedDate = new Date();
       
-      // If no am/pm specified and it's just a number, assume it's tomorrow
       if (!period) {
         suggestedDate.setDate(now.getDate() + 1);
       }
@@ -45,43 +72,71 @@ const Tasks = () => {
     return null;
   };
 
-  const toggleTask = (id) => {
-    setTasks(
-      tasks.map((task) =>
+  const toggleTask = async (id: string) => {
+    try {
+      const task = tasks.find(t => t.id === id);
+      if (!task) return;
+
+      const { error } = await supabase
+        .from('tasks')
+        .update({ completed: !task.completed })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      setTasks(tasks.map(task =>
         task.id === id ? { ...task, completed: !task.completed } : task
-      )
-    );
+      ));
+    } catch (error) {
+      console.error('Error toggling task:', error);
+    }
   };
 
-  const handleAddTask = () => {
+  const handleAddTask = async () => {
     if (!newTaskTitle.trim()) return;
 
-    const parsedTime = parseTimeFromTitle(newTaskTitle);
-    
-    const newTask = {
-      id: tasks.length ? tasks[tasks.length - 1].id + 1 : 1,
-      title: newTaskTitle,
-      completed: false,
-      priority: newTaskPriority,
-      dueDate: selectedDate || (parsedTime ? parsedTime.date : null),
-      dueTime: selectedTime || (parsedTime ? parsedTime.time : null),
-    };
+    try {
+      const parsedTime = parseTimeFromTitle(newTaskTitle);
+      
+      const newTask = {
+        title: newTaskTitle,
+        completed: false,
+        priority: newTaskPriority,
+        due_date: selectedDate || (parsedTime ? parsedTime.date : null),
+        due_time: selectedTime || (parsedTime ? parsedTime.time : null),
+        user_id: (await supabase.auth.getUser()).data.user?.id
+      };
 
-    setTasks([...tasks, newTask]);
-    setNewTaskTitle('');
-    setNewTaskPriority('medium');
-    setSelectedDate('');
-    setSelectedTime('');
-    setShowAddTask(false);
-    setShowCalendar(false);
-    setShowTimePicker(false);
+      const { data, error } = await supabase
+        .from('tasks')
+        .insert([newTask])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setTasks([data, ...tasks]);
+      setNewTaskTitle('');
+      setNewTaskPriority('medium');
+      setSelectedDate('');
+      setSelectedTime('');
+      setShowAddTask(false);
+      setShowCalendar(false);
+      setShowTimePicker(false);
+    } catch (error) {
+      console.error('Error adding task:', error);
+    }
   };
 
-  const formatDateTime = (date, time) => {
+  const formatDateTime = (date: string | null, time: string | null) => {
     if (!date && !time) return '';
-    const formattedDate = date ? new Date(date).toLocaleDateString() : '';
+    const formattedDate = date ? format(parseISO(date), 'PPP') : '';
     return `due on ${formattedDate}${time ? ` at ${time}` : ''}`;
   };
+
+  if (loading) {
+    return <div className="p-8">Loading tasks...</div>;
+  }
 
   return (
     <div className="p-8">
@@ -201,9 +256,9 @@ const Tasks = () => {
                   >
                     {task.title}
                   </p>
-                  {(task.dueDate || task.dueTime) && (
+                  {(task.due_date || task.due_time) && (
                     <p className="text-sm text-gray-500">
-                      {formatDateTime(task.dueDate, task.dueTime)}
+                      {formatDateTime(task.due_date, task.due_time)}
                     </p>
                   )}
                   <span
@@ -223,48 +278,7 @@ const Tasks = () => {
           </div>
         </div>
 
-        {/* Task Analytics Card */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold mb-6">Task Analytics</h3>
-          <div className="space-y-6">
-            <div>
-              <div className="flex justify-between mb-2">
-                <span className="text-sm font-medium text-gray-600">Daily Progress</span>
-                <span className="text-sm font-medium text-gray-800">8/10 tasks</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-blue-500 h-2 rounded-full" style={{ width: '80%' }}></div>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between mb-2">
-                <span className="text-sm font-medium text-gray-600">Weekly Goal</span>
-                <span className="text-sm font-medium text-gray-800">25/30 tasks</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-green-500 h-2 rounded-full" style={{ width: '83%' }}></div>
-              </div>
-            </div>
-
-            <div className="pt-6 border-t">
-              <h4 className="text-sm font-medium text-gray-600 mb-4">Task Categories</h4>
-              <div className="space-y-3">
-                {[
-                  { label: 'Work', count: 12, color: 'bg-blue-500' },
-                  { label: 'Personal', count: 8, color: 'bg-purple-500' },
-                  { label: 'Learning', count: 5, color: 'bg-green-500' },
-                ].map((category, index) => (
-                  <div key={index} className="flex items-center">
-                    <div className={`w-3 h-3 rounded-full ${category.color} mr-3`}></div>
-                    <span className="flex-1 text-sm text-gray-600">{category.label}</span>
-                    <span className="text-sm font-medium text-gray-800">{category.count}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        <CalendarView tasks={tasks} />
       </div>
     </div>
   );

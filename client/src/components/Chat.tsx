@@ -52,8 +52,8 @@ const Chat: React.FC = () => {
   const playNextTTS = async (message: string) => {
     setIsSpeaking(true);
     try {
-      const backendUrl = process.env.REACT_APP_BACKEND_URL;
-      console.log(backendUrl)
+      
+   
       const response = await axios.post(
         'https://productivityai.onrender.com/api/tts',
         { text: message },

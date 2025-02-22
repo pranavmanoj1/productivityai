@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, CheckCircle, BarChart, MessageSquare, Settings } from 'lucide-react';
+import {  Clock, CheckCircle, BarChart, MessageSquare, Settings } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
-import CalendarView from './components/Calendar';
 import Tasks from './components/Tasks';
 import Chat from './components/Chat';
 import Auth from './components/Auth';
+import Analytics from './components/Analytics';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -47,7 +47,7 @@ function App() {
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
       <main className="flex-1 overflow-y-auto">
         {activeTab === 'dashboard' && <Dashboard />}
-        {activeTab === 'calendar' && <CalendarView />}
+        {activeTab === 'analytics' && <Analytics />}
         {activeTab === 'tasks' && <Tasks />}
         {activeTab === 'chat' && <Chat />}
       </main>

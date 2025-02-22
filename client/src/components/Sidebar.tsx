@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, Home, CheckCircle, MessageSquare, Settings, LogOut } from 'lucide-react';
+import { FileBarChart , Home, CheckCircle, MessageSquare, Settings, LogOut } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface SidebarProps {
@@ -19,7 +19,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
 
   const menuItems = [
     { id: 'dashboard', icon: Home, label: 'Dashboard' },
-    { id: 'calendar', icon: Calendar, label: 'Calendar' },
+    { id: 'analytics', icon: FileBarChart, label: 'Analytics' },
     { id: 'tasks', icon: CheckCircle, label: 'Tasks' },
     { id: 'chat', icon: MessageSquare, label: 'AI Coach' },
   ];
