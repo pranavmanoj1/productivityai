@@ -1,59 +1,74 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Mic } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, Clock } from 'lucide-react';
 import axios from 'axios';
 
 interface Message {
   id: number;
   type: 'user' | 'ai';
   content: string;
+  timestamp: string;
 }
 
 const Chat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-
-  // Tracks if the user is "on a call" with the AI
   const [isOnCall, setIsOnCall] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [callDuration, setCallDuration] = useState(0);
+  const recognitionRef = useRef<any>(null);
+  const callTimerRef = useRef<number>();
 
-  // Whether the user wants periodic check-ins
-  const [checkInEnabled, setCheckInEnabled] = useState(false);
-  const [checkInMinutes, setCheckInMinutes] = useState(5);
-
-  // We'll store the interval ID in a ref so we can clear it on unmount or "end call"
-  const checkInIntervalRef = useRef<number | undefined>(undefined);
-
-  // --- NEW: TTS Queue ---
+  // TTS State
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
-  /**
-   * Push a message onto the TTS queue.
-   * The queue system will speak it when ready (when not currently speaking).
-   */
-  const queueTTSMessage = (message: string) => {
-    setMessageQueue((prevQueue) => [...prevQueue, message]);
+  useEffect(() => {
+    // Update clock every second
+    const clockInterval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(clockInterval);
+  }, []);
+
+  useEffect(() => {
+    if (isOnCall) {
+      callTimerRef.current = window.setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (callTimerRef.current) {
+        clearInterval(callTimerRef.current);
+      }
+      setCallDuration(0);
+    }
+
+    return () => {
+      if (callTimerRef.current) {
+        clearInterval(callTimerRef.current);
+      }
+    };
+  }, [isOnCall]);
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  /**
-   * Whenever the queue or `isSpeaking` changes, if we're NOT speaking
-   * and the queue isn't empty, we play the first item.
-   */
+  const queueTTSMessage = (message: string) => {
+    setMessageQueue(prev => [...prev, message]);
+  };
+
   useEffect(() => {
     if (!isSpeaking && messageQueue.length > 0) {
       playNextTTS(messageQueue[0]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messageQueue, isSpeaking]);
 
-  /**
-   * Actually fetch the MP3 from your server and play it.
-   * Once it ends (or errors), remove it from the queue and allow the next one to play.
-   */
   const playNextTTS = async (message: string) => {
     setIsSpeaking(true);
     try {
-      
-   
       const response = await axios.post(
         'https://productivityai.onrender.com/api/tts',
         { text: message },
@@ -63,250 +78,230 @@ const Chat: React.FC = () => {
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
 
-      // When audio finishes (or errors), remove the played message and free up for the next
       const handleCleanup = () => {
-        setMessageQueue((prev) => prev.slice(1)); // remove the first item
+        URL.revokeObjectURL(audioUrl);
+        setMessageQueue(prev => prev.slice(1));
         setIsSpeaking(false);
       };
 
       audio.onended = handleCleanup;
       audio.onerror = handleCleanup;
-      audio.play();
+      await audio.play();
     } catch (error) {
-      console.error('Error with Google TTS:', error);
-      // Even if error, remove the first item so we don't get stuck
-      setMessageQueue((prev) => prev.slice(1));
+      console.error('TTS Error:', error);
+      setMessageQueue(prev => prev.slice(1));
       setIsSpeaking(false);
     }
   };
 
-  /**
-   * Handle AI messages: add to chat + queue TTS
-   */
-  const addAIMessage = (content: string) => {
-    setMessages((prev) => [
-      ...prev,
-      { id: prev.length + 1, type: 'ai', content },
-    ]);
-    // Instead of playing directly, queue the message
-    queueTTSMessage(content);
-  };
-
-  /**
-   * Handle user messages: add to chat (no TTS)
-   */
-  const addUserMessage = (content: string) => {
-    setMessages((prev) => [
-      ...prev,
-      { id: prev.length + 1, type: 'user', content },
-    ]);
-  };
-
-  /**
-   * Send user input to the server and get AI response.
-   * Note: We're now calling the `/api/ai-response` endpoint.
-   */
-  const handleSend = async () => {
-    if (!input.trim()) return;
-
-    addUserMessage(input);
-    const currentInput = input;
-    setInput('');
-
-    try {
-      
-      const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
-        message: currentInput,
-      });
-      const aiResponse: string = response.data.freeform_answer;
-      addAIMessage(aiResponse);
-    } catch (error) {
-      console.error(error);
-      addAIMessage("Sorry, I'm having trouble connecting right now.");
+  const addMessage = (content: string, type: 'user' | 'ai') => {
+    const newMessage = {
+      id: Date.now(),
+      type,
+      content,
+      timestamp: new Date().toLocaleTimeString()
+    };
+    setMessages(prev => [...prev, newMessage]);
+    if (type === 'ai') {
+      queueTTSMessage(content);
     }
   };
 
-  /**
-   * Start listening for voice input using browser SpeechRecognition
-   */
-  const startVoiceInput = () => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      console.error('Speech recognition is not supported in this browser.');
-      return;
-    }
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setInput(transcript);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
-    };
-
-    recognition.start();
+  // Helper function to schedule the check-in message
+  const scheduleCheckIn = (delay: number) => {
+    setTimeout(() => {
+      addMessage("I'm checking in with you now! How are you doing with your tasks?", 'ai');
+    }, delay);
   };
 
-  /**
-   * Start the "call" with the AI
-   */
+  // Function to detect check in commands in the user message
+  const checkForCheckInCommand = (message: string) => {
+    // Regex matches "check in" optionally followed by a delay (e.g., "after 5 minutes" or "after 30 seconds")
+    const checkInRegex = /check in(?: after (\d+)\s*(minute|minutes|sec|seconds))?/i;
+    const match = message.match(checkInRegex);
+    if (match) {
+      if (match[1]) {
+        // Time provided – convert to milliseconds (defaulting to minutes unless specified as seconds)
+        const timeValue = parseInt(match[1]);
+        const unit = match[2].toLowerCase();
+        let delay = timeValue * 1000; // default is seconds
+        if (unit.startsWith('min')) {
+          delay = timeValue * 60 * 1000;
+        }
+        addMessage(`Okay, I'll check in with you in ${timeValue} ${unit}.`, 'ai');
+        scheduleCheckIn(delay);
+      } else {
+        // No time specified – ask the user for clarification
+        addMessage("After how long would you like me to check in with you?", 'ai');
+      }
+    }
+  };
+
   const handleStartCall = () => {
     setIsOnCall(true);
-    addAIMessage(
-      "Hello! I'm your AI productivity coach. How can I help you today? Would you like me to check in with you periodically?"
+    addMessage(
+      "Hello! I'm your AI assistant. I'm listening to you now. You can speak or click the microphone button to start talking.",
+      'ai'
     );
   };
 
-  /**
-   * End the "call" with the AI
-   */
   const handleEndCall = () => {
     setIsOnCall(false);
-    clearInterval(checkInIntervalRef.current);
-    addAIMessage(
-      "Okay, I'll end our call here. Feel free to reach out again anytime. Have a great day!"
-    );
+    setIsListening(false);
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    addMessage("Call ended. Thank you for talking with me!", 'ai');
   };
 
-  /**
-   * Periodic check-ins
-   */
-  useEffect(() => {
-    if (checkInIntervalRef.current) {
-      clearInterval(checkInIntervalRef.current);
+  const toggleListening = () => {
+    if (!isListening) {
+      startVoiceRecognition();
+    } else {
+      stopVoiceRecognition();
     }
-    if (isOnCall && checkInEnabled) {
-      const intervalId = window.setInterval(() => {
-        addAIMessage("Just checking in—how are you doing?");
-      }, checkInMinutes * 60 * 1000);
+  };
 
-      checkInIntervalRef.current = intervalId;
+  const startVoiceRecognition = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      addMessage("Sorry, voice recognition isn't supported in your browser.", 'ai');
+      return;
     }
-    return () => {
-      if (checkInIntervalRef.current) clearInterval(checkInIntervalRef.current);
+
+    recognitionRef.current = new SpeechRecognition();
+    recognitionRef.current.continuous = true;
+    recognitionRef.current.interimResults = false;
+    recognitionRef.current.lang = 'en-US';
+
+    recognitionRef.current.onresult = async (event: any) => {
+      const transcript = event.results[event.results.length - 1][0].transcript;
+      addMessage(transcript, 'user');
+
+      // Check if the message contains a check in command
+      checkForCheckInCommand(transcript);
+      
+      try {
+        const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
+          message: transcript
+        });
+        addMessage(response.data.freeform_answer, 'ai');
+      } catch (error) {
+        console.error('AI Response Error:', error);
+        addMessage("I'm having trouble processing your request.", 'ai');
+      }
     };
-  }, [checkInEnabled, isOnCall, checkInMinutes]);
+
+    recognitionRef.current.onerror = (event: any) => {
+      console.error('Voice Recognition Error:', event.error);
+      if (event.error === 'no-speech') {
+        addMessage("I didn't catch that. Could you please speak again?", 'ai');
+      }
+    };
+
+    recognitionRef.current.start();
+    setIsListening(true);
+  };
+
+  const stopVoiceRecognition = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    setIsListening(false);
+  };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="p-8 pb-4 flex flex-col gap-2">
-        <h2 className="text-2xl font-bold text-gray-800">AI Coach On Call</h2>
-        <p className="text-gray-600">
-          Start a call to receive live AI guidance, voice prompts, and check-ins.
-        </p>
-        <div className="flex gap-2">
-          <button
-            onClick={handleStartCall}
-            className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
-            disabled={isOnCall}
-          >
-            Start Call
-          </button>
-          <button
-            onClick={handleEndCall}
-            className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
-            disabled={!isOnCall}
-          >
-            End Call
-          </button>
-        </div>
-        {isOnCall && (
-          <div className="mt-4 p-4 bg-gray-100 rounded">
-            <div className="flex items-center gap-2 mb-2">
-              <input
-                type="checkbox"
-                id="checkInEnabled"
-                checked={checkInEnabled}
-                onChange={(e) => setCheckInEnabled(e.target.checked)}
-              />
-              <label htmlFor="checkInEnabled" className="text-sm">
-                Enable periodic check-ins
-              </label>
-            </div>
-            {checkInEnabled && (
-              <div className="flex items-center gap-2">
-                <label htmlFor="checkInMinutes" className="text-sm">
-                  Check in every
-                </label>
-                <input
-                  type="number"
-                  id="checkInMinutes"
-                  value={checkInMinutes}
-                  onChange={(e) => setCheckInMinutes(Number(e.target.value))}
-                  className="w-16 p-1 border rounded text-sm"
-                  min={1}
-                />
-                <span className="text-sm">minutes</span>
+    <div className="flex flex-col h-full bg-gray-50">
+      {/* Header with Clock */}
+      <div className="bg-white shadow-sm p-4">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <h2 className="text-xl font-semibold text-gray-800">AI Voice Assistant</h2>
+            {isOnCall && (
+              <div className="flex items-center gap-2 text-green-600">
+                <div className="w-2 h-2 bg-green-600 rounded-full animate-pulse" />
+                <span>On Call</span>
+                <span className="text-gray-600">({formatDuration(callDuration)})</span>
               </div>
             )}
           </div>
-        )}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 text-gray-600">
+              <Clock className="w-5 h-5" />
+              <span>{currentTime.toLocaleTimeString()}</span>
+            </div>
+            {!isOnCall ? (
+              <button
+                onClick={handleStartCall}
+                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+              >
+                <Phone className="w-5 h-5" />
+                <span>Start Call</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleEndCall}
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+              >
+                <PhoneOff className="w-5 h-5" />
+                <span>End Call</span>
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Chat Display */}
-      <div className="flex-1 overflow-y-auto px-8 pb-4">
+      {/* Chat Messages */}
+      <div className="flex-1 overflow-y-auto p-4">
         <div className="space-y-4">
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex ${
-                message.type === 'user' ? 'justify-end' : 'justify-start'
-              }`}
+              className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
                 className={`max-w-[80%] p-4 rounded-lg ${
                   message.type === 'user'
                     ? 'bg-blue-500 text-white'
-                    : 'bg-gray-100 text-gray-800'
+                    : 'bg-white text-gray-800 shadow-sm'
                 }`}
               >
-                <p className="text-sm">{message.content}</p>
+                <p>{message.content}</p>
+                <p className="text-xs mt-2 opacity-75">{message.timestamp}</p>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Input Controls */}
-      <div className="p-4 border-t bg-white">
-        <div className="flex items-center space-x-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={
+      {/* Voice Control Footer */}
+      <div className="bg-white border-t p-4">
+        <div className="flex justify-center">
+          <button
+            onClick={toggleListening}
+            disabled={!isOnCall}
+            className={`p-4 rounded-full transition-colors ${
               isOnCall
-                ? 'Speak or type your response...'
-                : 'Start the call to begin chatting...'
-            }
-            className="flex-1 p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-            disabled={!isOnCall}
-          />
-          <button
-            onClick={startVoiceInput}
-            className="p-3 bg-green-500 text-white rounded-lg hover:bg-green-600"
-            title="Voice Input"
-            disabled={!isOnCall}
+                ? isListening
+                  ? 'bg-red-500 hover:bg-red-600'
+                  : 'bg-blue-500 hover:bg-blue-600'
+                : 'bg-gray-300'
+            } text-white`}
           >
-            <Mic className="w-5 h-5" />
-          </button>
-          <button
-            onClick={handleSend}
-            className="p-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-            title="Send Message"
-            disabled={!isOnCall}
-          >
-            <Send className="w-5 h-5" />
+            {isListening ? (
+              <Mic className="w-6 h-6" />
+            ) : (
+              <MicOff className="w-6 h-6" />
+            )}
           </button>
         </div>
+        <p className="text-center mt-2 text-sm text-gray-600">
+          {isOnCall
+            ? isListening
+              ? "I'm listening... Click to pause"
+              : "Click the microphone to start speaking"
+            : "Start a call to begin"}
+        </p>
       </div>
     </div>
   );
