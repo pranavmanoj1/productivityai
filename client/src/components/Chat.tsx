@@ -22,12 +22,18 @@ const Chat: React.FC = () => {
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
+  // State to track if we are waiting for a check-in time specification
+  const [pendingCheckIn, setPendingCheckIn] = useState(false);
+
+  // State to handle check-in countdown
+  const [nextCheckInTime, setNextCheckInTime] = useState<number | null>(null);
+  const [checkInCountdown, setCheckInCountdown] = useState<number>(0);
+
   useEffect(() => {
     // Update clock every second
     const clockInterval = setInterval(() => {
       setCurrentTime(new Date());
     }, 1000);
-
     return () => clearInterval(clockInterval);
   }, []);
 
@@ -42,13 +48,33 @@ const Chat: React.FC = () => {
       }
       setCallDuration(0);
     }
-
     return () => {
       if (callTimerRef.current) {
         clearInterval(callTimerRef.current);
       }
     };
   }, [isOnCall]);
+
+  // Countdown effect for check-in with console logging
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (nextCheckInTime) {
+      interval = setInterval(() => {
+        const remaining = nextCheckInTime - Date.now();
+        if (remaining <= 0) {
+          setCheckInCountdown(0);
+          setNextCheckInTime(null);
+          console.log("Check-in countdown reached 0");
+          clearInterval(interval);
+        } else {
+          const countdownSeconds = Math.ceil(remaining / 1000);
+          setCheckInCountdown(countdownSeconds);
+          console.log("Check-in countdown:", countdownSeconds);
+        }
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [nextCheckInTime]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -107,10 +133,13 @@ const Chat: React.FC = () => {
     }
   };
 
-  // Helper function to schedule the check-in message
+  // Helper function to schedule the check-in message and set up the countdown timer
   const scheduleCheckIn = (delay: number) => {
+    setNextCheckInTime(Date.now() + delay);
     setTimeout(() => {
       addMessage("I'm checking in with you now! How are you doing with your tasks?", 'ai');
+      setNextCheckInTime(null);
+      setCheckInCountdown(0);
     }, delay);
   };
 
@@ -131,8 +160,9 @@ const Chat: React.FC = () => {
         addMessage(`Okay, I'll check in with you in ${timeValue} ${unit}.`, 'ai');
         scheduleCheckIn(delay);
       } else {
-        // No time specified – ask the user for clarification
+        // No time specified – ask the user for clarification and set pending state
         addMessage("After how long would you like me to check in with you?", 'ai');
+        setPendingCheckIn(true);
       }
     }
   };
@@ -178,9 +208,30 @@ const Chat: React.FC = () => {
       const transcript = event.results[event.results.length - 1][0].transcript;
       addMessage(transcript, 'user');
 
+      // If we're waiting for a check-in time specification, try to parse it from the user's reply
+      if (pendingCheckIn) {
+        const timeRegex = /(\d+)\s*(minute|minutes|sec|seconds)?/i;
+        const timeMatch = transcript.match(timeRegex);
+        if (timeMatch) {
+          const timeValue = parseInt(timeMatch[1]);
+          const unit = timeMatch[2] ? timeMatch[2].toLowerCase() : "minute";
+          let delay = timeValue * 1000;
+          if (unit.startsWith('min')) {
+            delay = timeValue * 60 * 1000;
+          }
+          addMessage(`Okay, I'll check in with you in ${timeValue} ${unit}.`, 'ai');
+          scheduleCheckIn(delay);
+          setPendingCheckIn(false);
+          return;
+        } else {
+          addMessage("Sorry, I didn't understand the time duration. Could you please specify in minutes or seconds?", 'ai');
+          return;
+        }
+      }
+
       // Check if the message contains a check in command
       checkForCheckInCommand(transcript);
-      
+
       try {
         const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
           message: transcript
@@ -250,6 +301,13 @@ const Chat: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Check-In Countdown Display */}
+      {nextCheckInTime && (
+        <div className="bg-yellow-100 p-2 text-center text-gray-800">
+          Next check in: {formatDuration(checkInCountdown)}
+        </div>
+      )}
 
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto p-4">
