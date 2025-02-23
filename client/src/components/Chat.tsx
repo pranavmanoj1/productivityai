@@ -122,7 +122,7 @@ const Chat: React.FC = () => {
 
   const addMessage = (content: string, type: 'user' | 'ai') => {
     const newMessage = {
-      id: Date.now(),
+      id: `${Date.now()}-${Math.random()}`,
       type,
       content,
       timestamp: new Date().toLocaleTimeString()
@@ -146,7 +146,7 @@ const Chat: React.FC = () => {
   // Function to detect check in commands in the user message
   const checkForCheckInCommand = (message: string) => {
     // Regex matches "check in" optionally followed by a delay (e.g., "after 5 minutes" or "after 30 seconds")
-    const checkInRegex = /check in(?: after (\d+)\s*(minute|minutes|sec|seconds))?/i;
+    const checkInRegex = /check in(?:.*?after (\d+)\s*(minute|minutes|sec|seconds))?/i;;
     const match = message.match(checkInRegex);
     if (match) {
       if (match[1]) {
@@ -157,11 +157,11 @@ const Chat: React.FC = () => {
         if (unit.startsWith('min')) {
           delay = timeValue * 60 * 1000;
         }
-        addMessage(`Okay, I'll check in with you in ${timeValue} ${unit}.`, 'ai');
+        
         scheduleCheckIn(delay);
       } else {
         // No time specified – ask the user for clarification and set pending state
-        addMessage("After how long would you like me to check in with you?", 'ai');
+        
         setPendingCheckIn(true);
       }
     }
@@ -170,7 +170,7 @@ const Chat: React.FC = () => {
   const handleStartCall = () => {
     setIsOnCall(true);
     addMessage(
-      "Hello! I'm your AI assistant. I'm listening to you now. You can speak or click the microphone button to start talking.",
+      "Hello! I'm your AI assistant. I'm listening to you now. You can click the microphone button to start talking.",
       'ai'
     );
   };
@@ -267,7 +267,7 @@ const Chat: React.FC = () => {
       <div className="bg-white shadow-sm p-4">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <h2 className="text-xl font-semibold text-gray-800">AI Voice Assistant</h2>
+            <h2 className="text-xl font-semibold text-gray-800">Chum AI Voice Assistant</h2>
             {isOnCall && (
               <div className="flex items-center gap-2 text-green-600">
                 <div className="w-2 h-2 bg-green-600 rounded-full animate-pulse" />
