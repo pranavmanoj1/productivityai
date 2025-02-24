@@ -20,12 +20,28 @@ app.get('/', (req, res) => {
 /**
  * POST /api/ai-response
  * 1) Calls GPT-3.5-turbo to parse tasks
- * 2) Inserts tasks into Supabase (TEMP user_id)
+ * 2) Inserts tasks into Supabase using the authenticated user's id
  * 3) If tasks inserted -> calls /api/tts with text: "Task added"
  * 4) Returns JSON with freeform_answer, inserted tasks, and TTS audio
  */
 app.post('/api/ai-response', async (req, res) => {
   console.log("Received request at /api/ai-response");
+  
+  // Extract JWT from Authorization header
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ error: 'No authentication token provided' });
+  }
+  const token = authHeader.split(' ')[1];
+
+  // Verify token and get user using Supabase auth
+  const { data: { user } } = await supabase.auth.getUser(token);
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+  const userId = user.id;
+  console.log("Authenticated user id:", userId);
+
   const { message } = req.body;
 
   // Build your OpenAI prompt
@@ -33,7 +49,7 @@ app.post('/api/ai-response', async (req, res) => {
     {
       role: "system",
       content: `You are a helpful assistant. 
-- First, produce a short "freeform_answer" responding to the user's question or statement. If they want to do a task make sure to give helpful advice and general advice for them to get started. Check in with them if they ask you to. Don't ask too many questions at once. Always be positve and upbeat and make sure the user makes the right decisions. If you don't know what to say ask 'would you like me to check in with you later'. ask this only if you haven't asked it before. IMPORTANT: Your entire response must be valid JSON. Do not include any additional commentary, greetings, or text outside of the JSON structure.
+- First, produce a short "freeform_answer" responding to the user's question or statement. If they want to do a task make sure to give helpful advice and general advice for them to get started. Don't give too much advice. Check in with them if they ask you to. If they want to do a task ask if they want to add it the task list. Don't ask too many questions at once. Always be positve and upbeat and make sure the user makes the right decisions. If you don't know what to say ask 'would you like me to check in with you later'. ask this only if you haven't asked it before. IMPORTANT: Your entire response must be valid JSON. Do not include any additional commentary, greetings, or text outside of the JSON structure.
 
 - Next, If the user instructs you to "check in", ask them "After how long should I check in with you?" if they did not include a time. Once they specify a time, later remind them by checking in.
 - Then, produce a JSON object called "structured_output" of the form:
@@ -42,7 +58,9 @@ app.post('/api/ai-response', async (req, res) => {
   "tasks": [
     {
       "title": string,
-      "due_date": string or null
+      "due_date": date (format: YYYY-MM-DD),
+      "priority": high| medium | low,
+      "due_time": time (format: HH:MM:SS 24-hour)
     },
     ...
   ]
@@ -114,19 +132,16 @@ No other top-level keys.`
       });
     }
 
-    // 4) Insert tasks into Supabase with a TEMP user_id
+    // 4) Insert tasks into Supabase using the authenticated user id
     let supabaseInsertData = [];
     let ttsAudioBase64 = null; // We'll store "Task added" TTS here
 
     if (parsedTasks.length > 0) {
-      // Always use this temporary user ID
-      const TEMP_USER_ID = "a2551082-57cb-454e-8ac8-4d2de727537b";
-
-      // Build the rows we'll insert
+      // Build the rows we'll insert, using the authenticated user's id
       const rows = parsedTasks.map((t) => ({
         title: t.title,
         due_date: t.due_date || null,
-        user_id: TEMP_USER_ID
+        user_id: userId
       }));
 
       console.log("[/api/ai-response] Inserting rows into Supabase:\n", rows);
