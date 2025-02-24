@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Phone, PhoneOff, Mic, MicOff, Clock } from 'lucide-react';
 import axios from 'axios';
+import { supabase } from '../lib/supabase';
 
 interface Message {
   id: number;
@@ -233,9 +234,15 @@ const Chat: React.FC = () => {
       checkForCheckInCommand(transcript);
 
       try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+            throw new Error("User not authenticated");
+        }
+        const token = session.access_token;
         const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
           message: transcript
-        });
+        }, { headers: { Authorization: `Bearer ${token}` } })
+        ;
         addMessage(response.data.freeform_answer, 'ai');
       } catch (error) {
         console.error('AI Response Error:', error);

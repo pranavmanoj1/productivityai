@@ -30,9 +30,20 @@ const Tasks = () => {
 
   const fetchTasks = async () => {
     try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        // Optionally, handle the case where no user is logged in.
+        setTasks([]);
+        return;
+      }
+
       const { data: tasks, error } = await supabase
         .from('tasks')
         .select('*')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -47,23 +58,23 @@ const Tasks = () => {
   const parseTimeFromTitle = (title: string) => {
     const timeRegex = /at\s+(\d{1,2})(?::\d{2})?\s*(pm|am)?/i;
     const match = title.match(timeRegex);
-    
+
     if (match) {
       let hours = parseInt(match[1]);
       const period = match[2]?.toLowerCase();
-      
+
       if (period === 'pm' && hours < 12) hours += 12;
       if (period === 'am' && hours === 12) hours = 0;
-      
+
       const now = new Date();
       let suggestedDate = new Date();
-      
+
       if (!period) {
         suggestedDate.setDate(now.getDate() + 1);
       }
-      
+
       suggestedDate.setHours(hours, 0, 0, 0);
-      
+
       return {
         date: suggestedDate.toISOString().split('T')[0],
         time: `${String(hours).padStart(2, '0')}:00`
@@ -97,7 +108,7 @@ const Tasks = () => {
 
     try {
       const parsedTime = parseTimeFromTitle(newTaskTitle);
-      
+
       const newTask = {
         title: newTaskTitle,
         completed: false,
@@ -185,7 +196,7 @@ const Tasks = () => {
                   <option value="low">Low</option>
                 </select>
               </div>
-              
+
               <div className="flex space-x-2">
                 <button
                   onClick={() => setShowCalendar(!showCalendar)}
