@@ -49,7 +49,7 @@ function App() {
         {activeTab === 'dashboard' && <Dashboard />}
         {activeTab === 'analytics' && <Analytics />}
         {activeTab === 'tasks' && <Tasks />}
-        <Chat isActive={activeTab === 'chat'} />
+        {activeTab === 'chat' && <Chat />}
       </main>
     </div>
   );
