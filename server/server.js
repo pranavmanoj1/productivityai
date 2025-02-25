@@ -14,15 +14,68 @@ app.use(cors());
 app.use(express.json());
 
 app.get('/', (req, res) => {
-  res.send("Server is running. POST to /api/ai-response or /api/tts.");
+  res.send("Server is running. POST to /api/ai-response or /api/tts, or GET /api/tasks.");
+});
+
+/**
+ * Helper function to fetch tasks from Supabase based on a sort/filter parameter.
+ * sortBy can be: today, thisWeek, thisMonth, priority, dueDate, or dueTime.
+ */
+async function fetchTasks(sortBy) {
+  let query = supabase.from('tasks').select('*');
+
+  if (sortBy === 'today') {
+    const today = new Date().toISOString().slice(0, 10);
+    query = query.eq('due_date', today);
+  } else if (sortBy === 'thisWeek') {
+    const today = new Date();
+    const nextWeek = new Date();
+    nextWeek.setDate(today.getDate() + 7);
+    const todayStr = today.toISOString().slice(0, 10);
+    const nextWeekStr = nextWeek.toISOString().slice(0, 10);
+    query = query.gte('due_date', todayStr).lte('due_date', nextWeekStr);
+  } else if (sortBy === 'thisMonth') {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const firstDay = new Date(year, month, 1).toISOString().slice(0, 10);
+    const lastDay = new Date(year, month + 1, 0).toISOString().slice(0, 10);
+    query = query.gte('due_date', firstDay).lte('due_date', lastDay);
+  } else if (sortBy === 'priority') {
+    query = query.order('priority', { ascending: false });
+  } else if (sortBy === 'dueDate') {
+    query = query.order('due_date', { ascending: true });
+  } else if (sortBy === 'dueTime') {
+    query = query.order('due_time', { ascending: true });
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("Error fetching tasks:", error);
+    return [];
+  }
+  return data;
+}
+
+/**
+ * GET /api/tasks
+ * Fetch tasks from Supabase with optional sorting/filtering.
+ */
+app.get('/api/tasks', async (req, res) => {
+  const { sortBy } = req.query;
+  const tasks = await fetchTasks(sortBy);
+  res.json({ tasks });
 });
 
 /**
  * POST /api/ai-response
- * 1) Calls GPT-3.5-turbo to parse tasks
- * 2) Inserts tasks into Supabase using the authenticated user's id
- * 3) If tasks inserted -> calls /api/tts with text: "Task added"
- * 4) Returns JSON with freeform_answer, inserted tasks, and TTS audio
+ * 1) Calls GPT-3.5-turbo to generate a freeform answer, optionally a check-in delay,
+ *    a task_query, and task details.
+ * 2) Inserts tasks into Supabase using the authenticated user's id.
+ * 3) If tasks are inserted -> calls /api/tts with text: "Task added".
+ * 4) If a task_query is provided, fetches tasks accordingly.
+ * 5) Returns JSON with freeform_answer, tasks_inserted, tasks_fetched (if any),
+ *    TTS audio, and check_in_delay.
  */
 app.post('/api/ai-response', async (req, res) => {
   console.log("Received request at /api/ai-response");
@@ -44,22 +97,32 @@ app.post('/api/ai-response', async (req, res) => {
 
   const { message } = req.body;
 
-  // Build your OpenAI prompt
+  // Get the current date and time for dynamic context
+  const now = new Date();
+  const currentDate = now.toLocaleDateString();
+  const currentTime = now.toLocaleTimeString();
+
+  // Build the OpenAI prompt with current date/time information.
+  // Notice the new "task_query" key instruction.
   const promptMessages = [
     {
       role: "system",
-      content: `You are a helpful assistant. 
-- First, produce a short "freeform_answer" responding to the user's question or statement. If they want to do a task make sure to give helpful advice and general advice for them to get started. Don't give too much advice. Check in with them if they ask you to. If they want to do a task ask if they want to add it the task list. Don't ask too many questions at once. Always be positve and upbeat and make sure the user makes the right decisions. If you don't know what to say ask 'would you like me to check in with you later'. ask this only if you haven't asked it before. IMPORTANT: Your entire response must be valid JSON. Do not include any additional commentary, greetings, or text outside of the JSON structure.
-
-- Next, If the user instructs you to "check in", ask them "After how long should I check in with you?" if they did not include a time. Once they specify a time, later remind them by checking in.
-- Then, produce a JSON object called "structured_output" of the form:
+      content: `You are a helpful assistant.
+Current date is: ${currentDate} and current time is: ${currentTime}.
+- First, produce a short "freeform_answer" responding to the user's question or statement.
+- If the user's message indicates a check-in command (for example, "check in" optionally followed by a time specification),
+  include an additional key "check_in_delay" in your JSON output. If a time is provided (e.g. "after 5 minutes"),
+  set "check_in_delay" to the number of milliseconds (e.g. 300000). If no time is provided, set "check_in_delay" to null.
+- Additionally, if the user wants to fetch tasks, include an optional key "task_query" with one of the following values:
+  "today", "thisWeek", "thisMonth", "priority", "dueDate", or "dueTime".
+- Next, produce a JSON object called "structured_output" of the form. Important: I want this to be not null only when the users asks you to add tasks.:
 
 {
   "tasks": [
     {
       "title": string,
       "due_date": date (format: YYYY-MM-DD),
-      "priority": high| medium | low,
+      "priority": "high" | "medium" | "low",
       "due_time": time (format: HH:MM:SS 24-hour)
     },
     ...
@@ -72,12 +135,14 @@ You must wrap your entire response in valid JSON, like:
 
 {
   "freeform_answer": "...",
+  "check_in_delay": number or null,
+  "task_query": string or null, 
   "structured_output": {
     "tasks": [ ... ]
   }
 }
 
-No other top-level keys.`
+Do not include any commentary or text outside of the JSON structure.`
     },
     {
       role: "user",
@@ -106,23 +171,27 @@ No other top-level keys.`
       }
     );
 
-    // 2) The AI's raw text (should be JSON)
+    // 2) The AI's raw text (should be valid JSON)
     const aiText = response.data.choices[0].message.content.trim();
     console.log("[/api/ai-response] Raw AI JSON response:\n", aiText);
 
     // 3) Parse the JSON
     let freeformAnswer = "";
     let parsedTasks = [];
+    let checkInDelay = null;
+    let taskQuery = null;
     try {
       const data = JSON.parse(aiText);
       freeformAnswer = data.freeform_answer || "";
+      checkInDelay = data.check_in_delay || null;
+      taskQuery = data.task_query || null;
       if (data.structured_output && Array.isArray(data.structured_output.tasks)) {
         parsedTasks = data.structured_output.tasks;
       }
-
       console.log("[/api/ai-response] Parsed freeform_answer:\n", freeformAnswer);
       console.log("[/api/ai-response] Parsed tasks:\n", parsedTasks);
-
+      console.log("[/api/ai-response] Parsed check_in_delay:\n", checkInDelay);
+      console.log("[/api/ai-response] Parsed task_query:\n", taskQuery);
     } catch (parseErr) {
       console.error("JSON parse error:", parseErr);
       // fallback: return the raw text
@@ -132,15 +201,17 @@ No other top-level keys.`
       });
     }
 
-    // 4) Insert tasks into Supabase using the authenticated user id
+    // 4) Insert tasks into Supabase using the authenticated user's id
     let supabaseInsertData = [];
     let ttsAudioBase64 = null; // We'll store "Task added" TTS here
 
     if (parsedTasks.length > 0) {
-      // Build the rows we'll insert, using the authenticated user's id
+      // Build the rows we'll insert, including additional task fields if provided.
       const rows = parsedTasks.map((t) => ({
         title: t.title,
         due_date: t.due_date || null,
+        priority: t.priority || null,
+        due_time: t.due_time || null,
         user_id: userId
       }));
 
@@ -159,8 +230,6 @@ No other top-level keys.`
         // If tasks inserted -> call /api/tts with "Task added"
         if (inserted && inserted.length > 0) {
           try {
-            // Make an *internal* call to our own TTS endpoint
-            // We'll request "arraybuffer" so we get raw binary data back
             const ttsResponse = await axios.post(
               `https://productivityai.onrender.com/api/tts/`,
               { text: "Task added" },
@@ -168,7 +237,6 @@ No other top-level keys.`
             );
 
             if (ttsResponse.data) {
-              // Convert the binary response to base64
               const audioBase64 = Buffer.from(ttsResponse.data, 'binary').toString('base64');
               ttsAudioBase64 = audioBase64;
               console.log("[/api/ai-response] TTS: 'Task added' generated successfully.");
@@ -182,11 +250,20 @@ No other top-level keys.`
       console.log("[/api/ai-response] No tasks found, skipping insert.");
     }
 
-    // 5) Return a JSON response (including TTS audio if generated)
+    // 5) If a task_query was provided by the AI, fetch tasks accordingly.
+    let tasksFetched = null;
+    if (taskQuery) {
+      tasksFetched = await fetchTasks(taskQuery);
+      console.log("[/api/ai-response] Fetched tasks for query:", taskQuery, tasksFetched);
+    }
+
+    // 6) Return a JSON response including check_in_delay and any fetched tasks.
     res.json({
       freeform_answer: freeformAnswer,
       tasks_inserted: supabaseInsertData,
-      tts_audio: ttsAudioBase64
+      tasks_fetched: tasksFetched,
+      tts_audio: ttsAudioBase64,
+      check_in_delay: checkInDelay
     });
 
   } catch (error) {
@@ -197,9 +274,9 @@ No other top-level keys.`
 
 /**
  * POST /api/tts
- * 1) Takes { text } in the body
- * 2) Calls Google Cloud TTS
- * 3) Returns MP3 audio in binary form
+ * 1) Takes { text } in the body.
+ * 2) Calls Google Cloud TTS.
+ * 3) Returns MP3 audio in binary form.
  */
 const credentials = process.env.GOOGLE_CLOUD_TTS_CREDENTIALS
   ? JSON.parse(process.env.GOOGLE_CLOUD_TTS_CREDENTIALS)
@@ -235,9 +312,8 @@ app.post('/api/tts', async (req, res) => {
       return res.status(500).send('No audio content received');
     }
 
-    // Return the MP3 bytes directly
     res.set('Content-Type', 'audio/mpeg');
-    return res.send(response.audioContent); // This is a Buffer or base64 string
+    return res.send(response.audioContent);
   } catch (err) {
     console.error('Error calling TTS:', err);
     res.status(500).json({ error: 'Failed to synthesize speech' });

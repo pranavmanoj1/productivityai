@@ -4,7 +4,7 @@ import axios from 'axios';
 import { supabase } from '../lib/supabase';
 
 interface Message {
-  id: number;
+  id: number | string;
   type: 'user' | 'ai';
   content: string;
   timestamp: string;
@@ -23,10 +23,7 @@ const Chat: React.FC = () => {
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
-  // State to track if we are waiting for a check-in time specification
-  const [pendingCheckIn, setPendingCheckIn] = useState(false);
-
-  // State to handle check-in countdown
+  // Check-in countdown state remains unchanged
   const [nextCheckInTime, setNextCheckInTime] = useState<number | null>(null);
   const [checkInCountdown, setCheckInCountdown] = useState<number>(0);
 
@@ -144,30 +141,6 @@ const Chat: React.FC = () => {
     }, delay);
   };
 
-  // Function to detect check in commands in the user message
-  const checkForCheckInCommand = (message: string) => {
-    // Regex matches "check in" optionally followed by a delay (e.g., "after 5 minutes" or "after 30 seconds")
-    const checkInRegex = /check in(?:.*?after (\d+)\s*(minute|minutes|sec|seconds))?/i;;
-    const match = message.match(checkInRegex);
-    if (match) {
-      if (match[1]) {
-        // Time provided – convert to milliseconds (defaulting to minutes unless specified as seconds)
-        const timeValue = parseInt(match[1]);
-        const unit = match[2].toLowerCase();
-        let delay = timeValue * 1000; // default is seconds
-        if (unit.startsWith('min')) {
-          delay = timeValue * 60 * 1000;
-        }
-        
-        scheduleCheckIn(delay);
-      } else {
-        // No time specified – ask the user for clarification and set pending state
-        
-        setPendingCheckIn(true);
-      }
-    }
-  };
-
   const handleStartCall = () => {
     setIsOnCall(true);
     addMessage(
@@ -209,41 +182,37 @@ const Chat: React.FC = () => {
       const transcript = event.results[event.results.length - 1][0].transcript;
       addMessage(transcript, 'user');
 
-      // If we're waiting for a check-in time specification, try to parse it from the user's reply
-      if (pendingCheckIn) {
-        const timeRegex = /(\d+)\s*(minute|minutes|sec|seconds)?/i;
-        const timeMatch = transcript.match(timeRegex);
-        if (timeMatch) {
-          const timeValue = parseInt(timeMatch[1]);
-          const unit = timeMatch[2] ? timeMatch[2].toLowerCase() : "minute";
-          let delay = timeValue * 1000;
-          if (unit.startsWith('min')) {
-            delay = timeValue * 60 * 1000;
-          }
-          addMessage(`Okay, I'll check in with you in ${timeValue} ${unit}.`, 'ai');
-          scheduleCheckIn(delay);
-          setPendingCheckIn(false);
-          return;
-        } else {
-          addMessage("Sorry, I didn't understand the time duration. Could you please specify in minutes or seconds?", 'ai');
-          return;
-        }
-      }
-
-      // Check if the message contains a check in command
-      checkForCheckInCommand(transcript);
-
+      // Remove client-side check-in command parsing.
+      // Instead, send the full transcript to the server.
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
-            throw new Error("User not authenticated");
+          throw new Error("User not authenticated");
         }
         const token = session.access_token;
         const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
           message: transcript
-        }, { headers: { Authorization: `Bearer ${token}` } })
-        ;
+        }, { headers: { Authorization: `Bearer ${token}` } });
+
+        // Add the AI's freeform answer to the chat.
         addMessage(response.data.freeform_answer, 'ai');
+        if (response.data.tasks_fetched && response.data.tasks_fetched.length > 0) {
+          const tasksList = response.data.tasks_fetched
+            .map(task =>
+              `${task.title}`
+            )
+            .join('\n');
+          addMessage(`Here are your tasks:\n${tasksList}`, 'ai');
+        }
+        if (response.data.tasks_fetched && response.data.tasks_fetched.length == 0){
+          addMessage(`You have no tasks scheduled for the given time period.`, 'ai');
+        }
+
+
+        // If the server indicates a check-in should be scheduled, trigger it.
+        if (response.data.check_in_delay && typeof response.data.check_in_delay === 'number') {
+          scheduleCheckIn(response.data.check_in_delay);
+        }
       } catch (error) {
         console.error('AI Response Error:', error);
         addMessage("I'm having trouble processing your request.", 'ai');
