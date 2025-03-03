@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, CheckCircle, Circle, Calendar, Clock } from 'lucide-react';
+import { Plus, CheckCircle, Circle, Calendar, Clock, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { format, parseISO } from 'date-fns';
 import CalendarView from './CalendarView';
@@ -23,6 +23,7 @@ const Tasks = () => {
   const [selectedTime, setSelectedTime] = useState('');
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTasks();
@@ -139,6 +140,22 @@ const Tasks = () => {
     }
   };
 
+  const deleteTask = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      setTasks(tasks.filter(task => task.id !== id));
+      setDeleteConfirm(null);
+    } catch (error) {
+      console.error('Error deleting task:', error);
+    }
+  };
+
   const formatDateTime = (date: string | null, time: string | null) => {
     if (!date && !time) return '';
     const formattedDate = date ? format(parseISO(date), 'PPP') : '';
@@ -242,50 +259,79 @@ const Tasks = () => {
           )}
 
           <div className="space-y-4">
-            {tasks.map((task) => (
-              <div
-                key={task.id}
-                className={`flex items-center p-3 rounded-lg ${
-                  task.completed ? 'bg-gray-50' : 'bg-white border border-gray-200'
-                }`}
-              >
-                <button
-                  onClick={() => toggleTask(task.id)}
-                  className="mr-3 text-gray-400 hover:text-blue-500"
+            {tasks.length === 0 ? (
+              <p className="text-center text-gray-500 py-4">No tasks yet. Add one to get started!</p>
+            ) : (
+              tasks.map((task) => (
+                <div
+                  key={task.id}
+                  className={`flex items-center p-3 rounded-lg ${
+                    task.completed ? 'bg-gray-50' : 'bg-white border border-gray-200'
+                  }`}
                 >
-                  {task.completed ? (
-                    <CheckCircle className="w-5 h-5 text-green-500" />
-                  ) : (
-                    <Circle className="w-5 h-5" />
-                  )}
-                </button>
-                <div className="flex-1">
-                  <p
-                    className={`font-medium ${
-                      task.completed ? 'text-gray-500 line-through' : 'text-gray-800'
-                    }`}
+                  <button
+                    onClick={() => toggleTask(task.id)}
+                    className="mr-3 text-gray-400 hover:text-blue-500"
                   >
-                    {task.title}
-                  </p>
-                  {(task.due_date || task.due_time) && (
-                    <p className="text-sm text-gray-500">
-                      {formatDateTime(task.due_date, task.due_time)}
+                    {task.completed ? (
+                      <CheckCircle className="w-5 h-5 text-green-500" />
+                    ) : (
+                      <Circle className="w-5 h-5" />
+                    )}
+                  </button>
+                  <div className="flex-1">
+                    <p
+                      className={`font-medium ${
+                        task.completed ? 'text-gray-500 line-through' : 'text-gray-800'
+                      }`}
+                    >
+                      {task.title}
                     </p>
+                    {(task.due_date || task.due_time) && (
+                      <p className="text-sm text-gray-500">
+                        {formatDateTime(task.due_date, task.due_time)}
+                      </p>
+                    )}
+                    <span
+                      className={`inline-block px-2 py-1 text-xs font-medium rounded-full ${
+                        task.priority === 'high'
+                          ? 'bg-red-100 text-red-800'
+                          : task.priority === 'low'
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-yellow-100 text-yellow-800'
+                      }`}
+                    >
+                      {task.priority}
+                    </span>
+                  </div>
+                  
+                  {deleteConfirm === task.id ? (
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => deleteTask(task.id)}
+                        className="px-2 py-1 text-xs font-medium text-white bg-red-600 rounded hover:bg-red-700"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirm(null)}
+                        className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setDeleteConfirm(task.id)}
+                      className="ml-2 text-gray-400 hover:text-red-500"
+                      aria-label="Delete task"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   )}
-                  <span
-                    className={`inline-block px-2 py-1 text-xs font-medium rounded-full ${
-                      task.priority === 'high'
-                        ? 'bg-red-100 text-red-800'
-                        : task.priority === 'low'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-yellow-100 text-yellow-800'
-                    }`}
-                  >
-                    {task.priority}
-                  </span>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
 
