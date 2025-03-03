@@ -22,7 +22,7 @@ app.get('/', (req, res) => {
  * sortBy can be: today, thisWeek, thisMonth, priority, dueDate, or dueTime.
  */
 async function fetchTasks(sortBy) {
-  let query = supabase.from('tasks').select('*');
+  let query = supabase.from('tasks').select('*').eq('user_id', userId);;
 
   if (sortBy === 'today') {
     const today = new Date().toISOString().slice(0, 10);
@@ -62,8 +62,21 @@ async function fetchTasks(sortBy) {
  * Fetch tasks from Supabase with optional sorting/filtering.
  */
 app.get('/api/tasks', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ error: 'No authentication token provided' });
+  }
+  const token = authHeader.split(' ')[1];
+
+  // Verify token and get user using Supabase auth
+  const { data: { user } } = await supabase.auth.getUser(token);
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+  const userId = user.id;
+
   const { sortBy } = req.query;
-  const tasks = await fetchTasks(sortBy);
+  const tasks = await fetchTasks(userId, sortBy);
   res.json({ tasks });
 });
 
