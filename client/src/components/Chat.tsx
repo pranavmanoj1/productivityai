@@ -144,7 +144,7 @@ const Chat: React.FC = () => {
   const handleStartCall = () => {
     setIsOnCall(true);
     addMessage(
-      "Hello! I'm your AI assistant. I'm listening to you now. You can click the microphone button to start talking.",
+      "Hello! I'm your AI assistant. I'm listening to you now. You can click the microphone button to start talking. I can check in with you at any time. Just let me know when you're ready.",
       'ai'
     );
   };
