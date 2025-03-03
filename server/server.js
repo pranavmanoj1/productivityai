@@ -21,7 +21,7 @@ app.get('/', (req, res) => {
  * Helper function to fetch tasks from Supabase based on a sort/filter parameter.
  * sortBy can be: today, thisWeek, thisMonth, priority, dueDate, or dueTime.
  */
-async function fetchTasks(sortBy) {
+async function fetchTasks(userId, sortBy) {
   let query = supabase.from('tasks').select('*').eq('user_id', userId);;
 
   if (sortBy === 'today') {
@@ -68,13 +68,13 @@ app.get('/api/tasks', async (req, res) => {
   }
   const token = authHeader.split(' ')[1];
 
-  // Verify token and get user using Supabase auth
+  // Verify token and get user using Supabase auth.
   const { data: { user } } = await supabase.auth.getUser(token);
   if (!user) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
   const userId = user.id;
-
+  
   const { sortBy } = req.query;
   const tasks = await fetchTasks(userId, sortBy);
   res.json({ tasks });
