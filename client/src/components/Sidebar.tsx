@@ -27,7 +27,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
   return (
     <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
       <div className="p-6">
-        <h1 className="text-2xl font-bold text-gray-800">ProductivityAI</h1>
+        <h1 className="text-2xl font-bold text-gray-800">ChumAI</h1>
       </div>
       <nav className="mt-6 flex-1">
         {menuItems.map((item) => {

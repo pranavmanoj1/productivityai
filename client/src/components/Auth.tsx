@@ -2,9 +2,6 @@ import React from 'react';
 import { supabase } from '../lib/supabase';
 import { Brain, Focus, Clock, MessageSquare } from 'lucide-react';
 
-// This is a placeholder for the actual supabase import
-// Uncomment when supabase is properly set up
-// import { supabase } from '../lib/supabase';
 
 const Auth = () => {
   const handleGoogleSignIn = async () => {
