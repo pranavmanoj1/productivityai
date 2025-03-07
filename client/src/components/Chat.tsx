@@ -27,6 +27,9 @@ const Chat: React.FC = () => {
   const [nextCheckInTime, setNextCheckInTime] = useState<number | null>(null);
   const [checkInCountdown, setCheckInCountdown] = useState<number>(0);
 
+  // New state for text input message
+  const [textMessage, setTextMessage] = useState('');
+
   useEffect(() => {
     // Update clock every second
     const clockInterval = setInterval(() => {
@@ -182,8 +185,6 @@ const Chat: React.FC = () => {
       const transcript = event.results[event.results.length - 1][0].transcript;
       addMessage(transcript, 'user');
 
-      // Remove client-side check-in command parsing.
-      // Instead, send the full transcript to the server.
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
@@ -194,22 +195,17 @@ const Chat: React.FC = () => {
           message: transcript
         }, { headers: { Authorization: `Bearer ${token}` } });
 
-        // Add the AI's freeform answer to the chat.
         addMessage(response.data.freeform_answer, 'ai');
         if (response.data.tasks_fetched && response.data.tasks_fetched.length > 0) {
           const tasksList = response.data.tasks_fetched
-            .map(task =>
-              `${task.title}`
-            )
+            .map(task => `${task.title}`)
             .join('\n');
           addMessage(`Here are your tasks:\n${tasksList}`, 'ai');
         }
-        if (response.data.tasks_fetched && response.data.tasks_fetched.length == 0){
+        if (response.data.tasks_fetched && response.data.tasks_fetched.length === 0) {
           addMessage(`You have no tasks scheduled for the given time period.`, 'ai');
         }
 
-
-        // If the server indicates a check-in should be scheduled, trigger it.
         if (response.data.check_in_delay && typeof response.data.check_in_delay === 'number') {
           scheduleCheckIn(response.data.check_in_delay);
         }
@@ -237,13 +233,50 @@ const Chat: React.FC = () => {
     setIsListening(false);
   };
 
+  // New function to handle text message submission
+  const handleTextSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!textMessage.trim()) return;
+
+    // Add user's text message to the chat
+    addMessage(textMessage, 'user');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error("User not authenticated");
+      }
+      const token = session.access_token;
+      const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
+        message: textMessage
+      }, { headers: { Authorization: `Bearer ${token}` } });
+
+      addMessage(response.data.freeform_answer, 'ai');
+      if (response.data.tasks_fetched && response.data.tasks_fetched.length > 0) {
+        const tasksList = response.data.tasks_fetched
+          .map(task => `${task.title}`)
+          .join('\n');
+        addMessage(`Here are your tasks:\n${tasksList}`, 'ai');
+      }
+      if (response.data.tasks_fetched && response.data.tasks_fetched.length === 0) {
+        addMessage(`You have no tasks scheduled for the given time period.`, 'ai');
+      }
+      if (response.data.check_in_delay && typeof response.data.check_in_delay === 'number') {
+        scheduleCheckIn(response.data.check_in_delay);
+      }
+    } catch (error) {
+      console.error('AI Response Error:', error);
+      addMessage("I'm having trouble processing your request.", 'ai');
+    }
+    setTextMessage('');
+  };
+
   return (
     <div className="flex flex-col h-full bg-gray-50">
       {/* Header with Clock */}
       <div className="bg-white shadow-sm p-4">
-        <div className="flex justify-between items-center">
+        <div className="flex ml-auto items-center">
           <div className="flex items-center gap-4">
-            <h2 className="text-xl font-semibold text-gray-800">Chum AI Voice Assistant</h2>
             {isOnCall && (
               <div className="flex items-center gap-2 text-green-600">
                 <div className="w-2 h-2 bg-green-600 rounded-full animate-pulse" />
@@ -306,6 +339,25 @@ const Chat: React.FC = () => {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Text Input for Messaging */}
+      <div className="bg-white border-t p-4">
+        <form onSubmit={handleTextSubmit} className="flex gap-2">
+          <input
+            type="text"
+            value={textMessage}
+            onChange={(e) => setTextMessage(e.target.value)}
+            placeholder="Don't feel like talking? Text me..."
+            className="flex-1 border rounded-lg p-2"
+          />
+          <button
+            type="submit"
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+          >
+            Send
+          </button>
+        </form>
       </div>
 
       {/* Voice Control Footer */}
