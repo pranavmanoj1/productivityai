@@ -9,7 +9,9 @@ interface Message {
   content: string;
   timestamp: string;
 }
-
+interface ChatProps {
+  isPopout?: boolean;
+}
 const Chat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isOnCall, setIsOnCall] = useState(false);

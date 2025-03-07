@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {  Clock, CheckCircle, BarChart, MessageSquare, Settings } from 'lucide-react';
+import { Clock, CheckCircle, BarChart, MessageSquare, Settings } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -57,36 +57,46 @@ function App() {
     const height = 600;
     const left = window.screen.width - width;
     const top = 0;
-
+  
     const newWindow = window.open(
       '',
       'ChatPopout',
       `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
     );
-
+  
     if (newWindow) {
+      // Write a complete HTML document with proper DOCTYPE and meta tags
       newWindow.document.write(`
         <!DOCTYPE html>
-        <html>
+        <html lang="en">
           <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Chum AI Chat</title>
-            <link rel="stylesheet" href="/src/index.css">
-            <script src="/src/chatPopout.js" type="module"></script>
+            <script src="https://cdn.tailwindcss.com"></script>
+            <style>
+              body { margin: 0; padding: 0; }
+              #chat-root { height: 100vh; }
+            </style>
           </head>
           <body>
             <div id="chat-root"></div>
           </body>
         </html>
       `);
-
-      // Mount the Chat component in the popout window
-      const chatRoot = newWindow.document.getElementById('chat-root');
-      if (chatRoot) {
-        mountChatInPopout(chatRoot);
-      }
-
-      setIsPopout(true);
+      newWindow.document.close();
+  
+      // Set window reference and state
       setPopoutWindow(newWindow);
+      setIsPopout(true);
+  
+      // Mount the chat component after the window loads
+      newWindow.onload = () => {
+        const chatRoot = newWindow.document.getElementById('chat-root');
+        if (chatRoot) {
+          mountChatInPopout(chatRoot);
+        }
+      };
     }
   };
 
@@ -121,12 +131,10 @@ function App() {
                   <polyline points="15 3 21 3 21 9" />
                   <line x1="10" y1="14" x2="21" y2="3" />
                 </svg>
-                out
+                Popout
               </button>
             </div>
-
-              <Chat />
-  
+            <Chat />
           </div>
         )}
       </main>

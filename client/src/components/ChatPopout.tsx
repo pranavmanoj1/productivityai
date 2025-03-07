@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import Chat from './Chat';
+import '../index.css'; // Import the CSS directly
 
 // Create a function to mount the Chat component in the popout window
 export function mountChatInPopout(containerElement: HTMLElement) {
