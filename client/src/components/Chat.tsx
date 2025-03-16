@@ -202,7 +202,7 @@ const Chat: React.FC = () => {
           const tasksList = response.data.tasks_fetched
             .map(task => `${task.title}`)
             .join('\n');
-          addMessage(`Here are your tasks:\n${tasksList}`, 'ai');
+          addMessage(`Here are your tasks:\n${tasksList}.  `, 'ai');
         }
         if (response.data.tasks_fetched && response.data.tasks_fetched.length === 0) {
           addMessage(`You have no tasks scheduled for the given time period.`, 'ai');
