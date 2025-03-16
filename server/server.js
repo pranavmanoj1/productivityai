@@ -271,7 +271,7 @@ Do not include any commentary or text outside of the JSON structure.`
     // 5) If a task_query was provided by the AI, fetch tasks accordingly.
     let tasksFetched = null;
     if (taskQuery) {
-      tasksFetched = await fetchTasks(taskQuery);
+      tasksFetched = await fetchTasks(userId, taskQuery);
       console.log("[/api/ai-response] Fetched tasks for query:", taskQuery, tasksFetched);
     }
 
