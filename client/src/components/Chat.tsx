@@ -9,9 +9,37 @@ interface Message {
   content: string;
   timestamp: string;
 }
-interface ChatProps {
-  isPopout?: boolean;
+
+interface ChatTranscriptProps {
+  messages: Message[];
 }
+
+const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages }) => {
+  return (
+    <div className="flex-1 overflow-y-auto p-4">
+      <div className="space-y-4">
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div
+              className={`max-w-[80%] p-4 rounded-lg ${
+                message.type === 'user'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-white text-gray-800 shadow-sm'
+              }`}
+            >
+              <p>{message.content}</p>
+              <p className="text-xs mt-2 opacity-75">{message.timestamp}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const Chat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isOnCall, setIsOnCall] = useState(false);
@@ -25,7 +53,7 @@ const Chat: React.FC = () => {
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
-  // Check-in countdown state remains unchanged
+  // Check-in countdown state
   const [nextCheckInTime, setNextCheckInTime] = useState<number | null>(null);
   const [checkInCountdown, setCheckInCountdown] = useState<number>(0);
 
@@ -58,7 +86,7 @@ const Chat: React.FC = () => {
     };
   }, [isOnCall]);
 
-  // Countdown effect for check-in with console logging
+  // Countdown effect for check-in
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (nextCheckInTime) {
@@ -202,12 +230,11 @@ const Chat: React.FC = () => {
           const tasksList = response.data.tasks_fetched
             .map(task => `${task.title}`)
             .join('\n');
-          addMessage(`Here are your tasks:\n${tasksList}.  `, 'ai');
+          addMessage(`Here are your tasks:\n${tasksList}`, 'ai');
         }
         if (response.data.tasks_fetched && response.data.tasks_fetched.length === 0) {
           addMessage(`You have no tasks scheduled for the given time period.`, 'ai');
         }
-
         if (response.data.check_in_delay && typeof response.data.check_in_delay === 'number') {
           scheduleCheckIn(response.data.check_in_delay);
         }
@@ -235,12 +262,11 @@ const Chat: React.FC = () => {
     setIsListening(false);
   };
 
-  // New function to handle text message submission
+  // Handle text message submission
   const handleTextSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!textMessage.trim()) return;
 
-    // Add user's text message to the chat
     addMessage(textMessage, 'user');
 
     try {
@@ -320,28 +346,8 @@ const Chat: React.FC = () => {
         </div>
       )}
 
-      {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto p-4">
-        <div className="space-y-4">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div
-                className={`max-w-[80%] p-4 rounded-lg ${
-                  message.type === 'user'
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-white text-gray-800 shadow-sm'
-                }`}
-              >
-                <p>{message.content}</p>
-                <p className="text-xs mt-2 opacity-75">{message.timestamp}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Chat Transcript */}
+      <ChatTranscript messages={messages} />
 
       {/* Text Input for Messaging */}
       <div className="bg-white border-t p-4">
