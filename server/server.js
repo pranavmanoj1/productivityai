@@ -6,12 +6,14 @@ require('dotenv').config();
 const textToSpeech = require('@google-cloud/text-to-speech');
 const { createClient } = require('@supabase/supabase-js');
 
-// 1) Create a Supabase client
+// Create a Supabase client
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+const userConversations = {};
 
 app.get('/', (req, res) => {
   res.send("Server is running. POST to /api/ai-response or /api/tts, or GET /api/tasks.");
@@ -19,10 +21,9 @@ app.get('/', (req, res) => {
 
 /**
  * Helper function to fetch tasks from Supabase based on a sort/filter parameter.
- * sortBy can be: today, thisWeek, thisMonth, priority, dueDate, or dueTime.
  */
 async function fetchTasks(userId, sortBy) {
-  let query = supabase.from('tasks').select('*').eq('user_id', userId);;
+  let query = supabase.from('tasks').select('*').eq('user_id', userId);
 
   if (sortBy === 'today') {
     const today = new Date().toISOString().slice(0, 10);
@@ -80,15 +81,118 @@ app.get('/api/tasks', async (req, res) => {
   res.json({ tasks });
 });
 
+// Function to make GPT API calls with optimized prompts
+async function callGPT(messages, maxTokens = 200) {
+  console.log("Making GPT call with messages:");
+  return axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: "gpt-3.5-turbo",
+      messages,
+      max_tokens: maxTokens,
+      temperature: 0.7,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0.6
+    },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+    }
+  );
+}
+
+// Step 1: Initial analysis of user input - simpler, more focused
+async function analyzeUserIntent(message) {
+  const now = new Date();
+  const currentDate = now.toLocaleDateString();
+  const currentTime = now.toLocaleTimeString();
+  
+  const messages = [
+    {
+      role: "system",
+      content: `You are analyzing a user message to determine intent. Current date: ${currentDate}, time: ${currentTime}.
+Respond with a JSON object containing:
+{
+  "intent": one of ["task_creation", "task_query", "check_in", "general_chat"],
+  "check_in_delay": number of milliseconds if specified (e.g. 300000 for 5 minutes) or null,
+  "task_query_type": one of ["today", "thisWeek", "thisMonth", "priority", "dueDate", "dueTime"] or null,
+  "emotional_state": one of ["neutral", "stressed", "overwhelmed", "anxious", "positive"] 
+}`
+    },
+    { role: "user", content: message }
+  ];
+
+  const response = await callGPT(messages, 500);
+  return JSON.parse(response.data.choices[0].message.content.trim());
+}
+
+// Step 2: Generate appropriate response based on intent
+async function generateResponse(message, intent) {
+  let systemPrompt = "";
+
+  if (intent.intent === "task_creation") {
+    systemPrompt = `You are a productivity assistant. Current date: ${new Date().toLocaleDateString().slice(0, 10)} Current time: ${new Date().toLocaleTimeString().slice(0, 10)}. Generate a freeform response that breaks the user's task into manageable steps. Also create a structured_output JSON with tasks to add. Return the entire response as valid JSON only (no markdown, no code blocks).
+
+    {
+      "freeform_answer": "your helpful response",
+      "structured_output": {
+        "tasks": [
+          {
+            "title": "task title",
+            "due_date": "YYYY-MM-DD ",
+            "priority": "high|medium|low",
+            "due_time": "HH:MM:SS "
+          }
+        ]
+      }
+    }`;
+  } else if (intent.intent === "check_in") {
+    systemPrompt = `You are checking in with the user. Generate a freeform response asking how their progress is going. Return the entire response as valid JSON only (no markdown, no code blocks).
+
+{
+  "freeform_answer": "your check-in response"
+}`;
+  } else if (intent.intent === "task_query") {
+    systemPrompt = `You are helping retrieve tasks. Generate a freeform response acknowledging the user's request. Return the entire response as valid JSON only (no markdown, no code blocks).
+
+{
+  "freeform_answer": "your response about retrieving tasks"
+}`;
+  } else {
+    // General chat
+    systemPrompt = `You are a productivity and wellness assistant. Based on the user's emotional state (${intent.emotional_state}), provide a supportive response. Return the entire response as valid JSON only (no markdown, no code blocks).
+
+{
+  "freeform_answer": "your empathetic response",
+  "requires_followup": true or false
+}`;
+  }
+
+  const messages = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: message }
+  ];
+
+  // Call your GPT function
+  const response = await callGPT(messages, 1000);
+  let responseText = response.data.choices[0].message.content.trim();
+
+  // Remove any code fences if they appear
+  responseText = responseText
+    .replace(/^```(?:json)?\s*/i, "")  // remove opening ```
+    .replace(/```$/, "");             // remove closing ```
+  console.log("[/api/ai-response] AI raw JSON:", responseText);
+  // Finally, parse and return the JSON
+  // (You could wrap this in try/catch if you want to handle malformed JSON gracefully)
+  return JSON.parse(responseText);
+}
+
 /**
  * POST /api/ai-response
- * 1) Calls GPT-3.5-turbo to generate a freeform answer, optionally a check-in delay,
- *    a task_query, and task details.
- * 2) Inserts tasks into Supabase using the authenticated user's id.
- * 3) If tasks are inserted -> calls /api/tts with text: "Task added".
- * 4) If a task_query is provided, fetches tasks accordingly.
- * 5) Returns JSON with freeform_answer, tasks_inserted, tasks_fetched (if any),
- *    TTS audio, and check_in_delay.
+ * Optimized to break down the large GPT call into smaller, more focused calls
  */
 app.post('/api/ai-response', async (req, res) => {
   console.log("Received request at /api/ai-response");
@@ -110,120 +214,36 @@ app.post('/api/ai-response', async (req, res) => {
 
   const { message } = req.body;
 
-  // Get the current date and time for dynamic context
-  const now = new Date();
-  const currentDate = now.toLocaleDateString();
-  const currentTime = now.toLocaleTimeString();
-
-  // Build the OpenAI prompt with current date/time information.
-  // Notice the new "task_query" key instruction.
-  const promptMessages = [
-    {
-      role: "system",
-      content: `You are a helpful assistant.
-Current date is: ${currentDate} and current time is: ${currentTime}.
-- First, produce a short "freeform_answer" You are a productivity and wellness assistant integrated into a ChumAI tool. Your role is to support users in these key areas:
-  You are an empathetic productivity coach. You must detect if the user is feeling overwhelmed, stressed, or anxious. If so, you should provide a calming response and suggest
-   a short mindfulness exercise or breathing technique.
-  When the user says they want to work on something break that tasks into smaller steps for them. do this proactively. If you feel you need more inforrmation, ask them clarifying questions. But dont ask too many questions.
-   Ask the user if they'd like to get started on the task that you suggested. when they say yes, ask if you'd like to set a timer for them so that you chan check in with them.
-- If the user's message indicates a check-in command (for example, "check in" optionally followed by a time specification),
-  include an additional key "check_in_delay" in your JSON output. If a time is provided (e.g. "after 5 minutes"),
-  set "check_in_delay" to the number of milliseconds (e.g. 300000). If no time is provided, set "check_in_delay" to null.
-- Additionally, if the user wants to fetch tasks, include an optional key "task_query" with one of the following values:
-  "today", "thisWeek", "thisMonth", "priority", "dueDate", or "dueTime".
-- Next, produce a JSON object called "structured_output" of the form. Important: I want this to be not null only when the users asks you to add tasks.:
-
-{
-  "tasks": [
-    {
-      "title": string,
-      "due_date": date (format: YYYY-MM-DD),
-      "priority": "high" | "medium" | "low",
-      "due_time": time (format: HH:MM:SS 24-hour)
-    },
-    ...
-  ]
-}
-
-If no tasks are found, return { "tasks": [] }.
-
-You must wrap your entire response in valid JSON, like:
-
-{
-  "freeform_answer": "...",
-  "check_in_delay": number or null,
-  "task_query": string or null, 
-  "structured_output": {
-    "tasks": [ ... ]
+  if (!userConversations[userId]) {
+    userConversations[userId] = [];
   }
-}
-
-Do not include any commentary or text outside of the JSON structure.`
-    },
-    {
-      role: "user",
-      content: message
-    }
-  ];
 
   try {
-    // 1) Call OpenAI
-    const response = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: "gpt-3.5-turbo",
-        messages: promptMessages,
-        max_tokens: 250,
-        temperature: 0.7,
-        top_p: 1,
-        frequency_penalty: 0,
-        presence_penalty: 0.6
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-      }
-    );
-
-    // 2) The AI's raw text (should be valid JSON)
-    const aiText = response.data.choices[0].message.content.trim();
-    console.log("[/api/ai-response] Raw AI JSON response:\n", aiText);
-
-    // 3) Parse the JSON
-    let freeformAnswer = "";
+    // Step 1: Analyze intent with a smaller, focused API call
+    const intent = await analyzeUserIntent(message);
+    console.log("[/api/ai-response] Analyzed intent:", intent);
+    
+    // Step 2: Generate appropriate response based on intent
+    const aiResponse = await generateResponse(message, intent);
+    console.log("[/api/ai-response] Generated response:", aiResponse);
+    
+    // Extract data from AI response
+    let freeformAnswer = aiResponse.freeform_answer || "";
     let parsedTasks = [];
-    let checkInDelay = null;
-    let taskQuery = null;
-    try {
-      const data = JSON.parse(aiText);
-      freeformAnswer = data.freeform_answer || "";
-      checkInDelay = data.check_in_delay || null;
-      taskQuery = data.task_query || null;
-      if (data.structured_output && Array.isArray(data.structured_output.tasks)) {
-        parsedTasks = data.structured_output.tasks;
-      }
-      console.log("[/api/ai-response] Parsed freeform_answer:\n", freeformAnswer);
-      console.log("[/api/ai-response] Parsed tasks:\n", parsedTasks);
-      console.log("[/api/ai-response] Parsed check_in_delay:\n", checkInDelay);
-      console.log("[/api/ai-response] Parsed task_query:\n", taskQuery);
-    } catch (parseErr) {
-      console.error("JSON parse error:", parseErr);
-      // fallback: return the raw text
-      return res.json({
-        response: aiText,
-        warning: "Failed to parse tasks from AI response"
-      });
+    let requiresFollowup = aiResponse.requires_followup === true;
+    let checkInDelay = intent.check_in_delay;
+    let taskQuery = intent.task_query_type;
+    
+    if (aiResponse.structured_output && Array.isArray(aiResponse.structured_output.tasks)) {
+      parsedTasks = aiResponse.structured_output.tasks;
     }
 
-    // 4) Insert tasks into Supabase using the authenticated user's id
+    // Handle task insertion if needed
     let supabaseInsertData = [];
-    let ttsAudioBase64 = null; // We'll store "Task added" TTS here
+    let ttsAudioBase64 = null;
 
     if (parsedTasks.length > 0) {
-      // Build the rows we'll insert, including additional task fields if provided.
+      // Build the rows we'll insert
       const rows = parsedTasks.map((t) => ({
         title: t.title,
         due_date: t.due_date || null,
@@ -232,7 +252,7 @@ Do not include any commentary or text outside of the JSON structure.`
         user_id: userId
       }));
 
-      console.log("[/api/ai-response] Inserting rows into Supabase:\n", rows);
+      console.log("[/api/ai-response] Inserting rows into Supabase:", rows);
 
       const { data: inserted, error: supaErr } = await supabase
         .from('tasks')
@@ -242,13 +262,13 @@ Do not include any commentary or text outside of the JSON structure.`
         console.error("Supabase insert error:", supaErr);
       } else {
         supabaseInsertData = inserted;
-        console.log("[/api/ai-response] Inserted tasks from AI:\n", supabaseInsertData);
+        console.log("[/api/ai-response] Inserted tasks from AI:", supabaseInsertData);
 
         // If tasks inserted -> call /api/tts with "Task added"
         if (inserted && inserted.length > 0) {
           try {
             const ttsResponse = await axios.post(
-              `https://productivityai.onrender.com/api/tts/`,
+              `http://localhost:5001/api/tts/`,
               { text: "Task added" },
               { responseType: 'arraybuffer' }
             );
@@ -263,37 +283,271 @@ Do not include any commentary or text outside of the JSON structure.`
           }
         }
       }
-    } else {
-      console.log("[/api/ai-response] No tasks found, skipping insert.");
     }
 
-    // 5) If a task_query was provided by the AI, fetch tasks accordingly.
+    // If a task_query was provided, fetch tasks accordingly
     let tasksFetched = null;
     if (taskQuery) {
       tasksFetched = await fetchTasks(userId, taskQuery);
       console.log("[/api/ai-response] Fetched tasks for query:", taskQuery, tasksFetched);
     }
 
-    // 6) Return a JSON response including check_in_delay and any fetched tasks.
+    // Return the complete response
     res.json({
       freeform_answer: freeformAnswer,
       tasks_inserted: supabaseInsertData,
       tasks_fetched: tasksFetched,
       tts_audio: ttsAudioBase64,
-      check_in_delay: checkInDelay
+      check_in_delay: checkInDelay,
+      requires_followup: requiresFollowup
     });
 
   } catch (error) {
-    console.error("OpenAI request error:", error);
+    console.error("Error in /api/ai-response:", error);
     return res.status(500).json({ error: 'Failed to get AI response' });
   }
 });
+  
+  /**
+   * GET /api/tasks
+   * Fetch tasks from Supabase with optional sorting/filtering.
+   */
+  app.get('/api/tasks', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'No authentication token provided' });
+    }
+    const token = authHeader.split(' ')[1];
+  
+    // Verify token and get user using Supabase auth.
+    const { data: { user } } = await supabase.auth.getUser(token);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+    const userId = user.id;
+    
+    const { sortBy } = req.query;
+    const tasks = await fetchTasks(userId, sortBy);
+    res.json({ tasks });
+  });
+  
+  // Function to make GPT API calls with optimized prompts
+  async function callGPT(messages, maxTokens = 1000) {
+    return axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: "gpt-3.5-turbo",
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.7,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0.6
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+      }
+    );
+  }
+  
+  // Step 1: Initial analysis of user input - simpler, more focused
+  async function analyzeUserIntent(message) {
+    const now = new Date();
+    const currentDate = now.toLocaleDateString();
+    const currentTime = now.toLocaleTimeString();
+    
+    const messages = [
+      {
+        role: "system",
+        content: `You are analyzing a user message to determine intent. Current date: ${currentDate}, time: ${currentTime}.
+  Respond with a JSON object containing:
+  {
+    "intent": one of ["task_creation", "task_query", "check_in", "general_chat","task_to_work_on"],
+    "check_in_delay": number of milliseconds if specified (e.g. 300000 for 5 minutes) or null,
+    "task_query_type": one of ["today", "thisWeek", "thisMonth", "priority", "dueDate", "dueTime"] or null,
+    "emotional_state": one of ["neutral", "stressed", "overwhelmed", "anxious", "positive"] 
+  }`
+      },
+      { role: "user", content: message }
+    ];
+  
+    const response = await callGPT(messages, 5000);
+    return JSON.parse(response.data.choices[0].message.content.trim());
+  }
+  
+  // Step 2: Generate appropriate response based on intent
+  async function generateResponse(message, intent) {
+    let systemPrompt = "";
 
+    if (intent.intent === "task_to_work_on") {
+      systemPrompt = `You are a productivity assistant. If a user asks you to work on a task, generate a freeform response that breaks the user's task into the most actionable steps. ask if the recommendations are good. Return the entire response as valid JSON only (no markdown, no code blocks).`
+    }
+    if (intent.intent === "task_creation") {
+      systemPrompt = `You are a productivity assistant. Generate a freeform response that breaks the user's task into manageable steps. Create the most actionable step and add it to the task list
+  {
+    "structured_output": {
+      "tasks": [
+        {
+          "title": "task title",
+          'due_date": "YYYY-MM-DD",
+          "priority": "high|medium|low",
+          "due_time": "01:02:33"
+        }
+      ]
+    }
+  }`;
+    } else if (intent.intent === "check_in") {
+      systemPrompt = `You are checking in with the user. Generate a freeform response asking how their progress is going:
+  {
+    "freeform_answer": "your check-in response"
+  }`;
+    } else if (intent.intent === "task_query") {
+      systemPrompt = `You are helping retrieve tasks. Generate a freeform response acknowledging the user's request:
+  {
+    "freeform_answer": "your response about retrieving tasks"
+  }`;
+    } else {
+      // General chat
+      systemPrompt = `You are a productivity and wellness assistant. Based on the user's emotional state (${intent.emotional_state}), provide a supportive response:
+  {
+    "freeform_answer": "your empathetic response",
+    "requires_followup": true or false
+  }`;
+    }
+    
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: message }
+    ];
+    
+    const response = await callGPT(messages, 500);
+    return JSON.parse(response.data.choices[0].message.content.trim());
+  }
+  
+  /**
+   * POST /api/ai-response
+   * Optimized to break down the large GPT call into smaller, more focused calls
+   */
+  app.post('/api/ai-response', async (req, res) => {
+    console.log("Received request at /api/ai-response");
+    
+    // Extract JWT from Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'No authentication token provided' });
+    }
+    const token = authHeader.split(' ')[1];
+  
+    // Verify token and get user using Supabase auth
+    const { data: { user } } = await supabase.auth.getUser(token);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+    const userId = user.id;
+    console.log("Authenticated user id:", userId);
+  
+    const { message } = req.body;
+  
+    if (!userConversations[userId]) {
+      userConversations[userId] = [];
+    }
+  
+    try {
+      // Step 1: Analyze intent with a smaller, focused API call
+      const intent = await analyzeUserIntent(message);
+      console.log("[/api/ai-response] Analyzed intent:", intent);
+      
+      // Step 2: Generate appropriate response based on intent
+      const aiResponse = await generateResponse(message, intent);
+      console.log("[/api/ai-response] Generated response:", aiResponse);
+      
+      // Extract data from AI response
+      let freeformAnswer = aiResponse.freeform_answer || "";
+      let parsedTasks = [];
+      let requiresFollowup = aiResponse.requires_followup === true;
+      let checkInDelay = intent.check_in_delay;
+      let taskQuery = intent.task_query_type;
+      
+      if (aiResponse.structured_output && Array.isArray(aiResponse.structured_output.tasks)) {
+        parsedTasks = aiResponse.structured_output.tasks;
+      }
+  
+      // Handle task insertion if needed
+      let supabaseInsertData = [];
+      let ttsAudioBase64 = null;
+  
+      if (parsedTasks.length > 0) {
+        // Build the rows we'll insert
+        const rows = parsedTasks.map((t) => ({
+          title: t.title,
+          due_date: t.due_date || null,
+          priority: t.priority || null,
+          due_time: t.due_time || null,
+          user_id: userId
+        }));
+  
+        console.log("[/api/ai-response] Inserting rows into Supabase:", rows);
+  
+        const { data: inserted, error: supaErr } = await supabase
+          .from('tasks')
+          .insert(rows);
+  
+        if (supaErr) {
+          console.error("Supabase insert error:", supaErr);
+        } else {
+          supabaseInsertData = inserted;
+          console.log("[/api/ai-response] Inserted tasks from AI:", supabaseInsertData);
+  
+          // If tasks inserted -> call /api/tts with "Task added"
+          if (inserted && inserted.length > 0) {
+            try {
+              const ttsResponse = await axios.post(
+                `http://localhost:5001/api/tts/`,
+                { text: "Task added" },
+                { responseType: 'arraybuffer' }
+              );
+  
+              if (ttsResponse.data) {
+                const audioBase64 = Buffer.from(ttsResponse.data, 'binary').toString('base64');
+                ttsAudioBase64 = audioBase64;
+                console.log("[/api/ai-response] TTS: 'Task added' generated successfully.");
+              }
+            } catch (ttsErr) {
+              console.error("Error calling /api/tts for 'Task added':", ttsErr);
+            }
+          }
+        }
+      }
+  
+      // If a task_query was provided, fetch tasks accordingly
+      let tasksFetched = null;
+      if (taskQuery) {
+        tasksFetched = await fetchTasks(userId, taskQuery);
+        console.log("[/api/ai-response] Fetched tasks for query:", taskQuery, tasksFetched);
+      }
+  
+      // Return the complete response
+      res.json({
+        freeform_answer: freeformAnswer,
+        tasks_inserted: supabaseInsertData,
+        tasks_fetched: tasksFetched,
+        tts_audio: ttsAudioBase64,
+        check_in_delay: checkInDelay,
+        requires_followup: requiresFollowup
+      });
+  
+    } catch (error) {
+      console.error("Error in /api/ai-response:", error);
+      return res.status(500).json({ error: 'Failed to get AI response' });
+    }
+  });
+  
 /**
  * POST /api/tts
- * 1) Takes { text } in the body.
- * 2) Calls Google Cloud TTS.
- * 3) Returns MP3 audio in binary form.
+ * Text-to-speech endpoint
  */
 const credentials = process.env.GOOGLE_CLOUD_TTS_CREDENTIALS
   ? JSON.parse(process.env.GOOGLE_CLOUD_TTS_CREDENTIALS)
