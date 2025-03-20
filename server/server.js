@@ -257,7 +257,7 @@ app.post('/api/ai-response', async (req, res) => {
           }
         }
       }
-    }
+    }}
 
     // If a task_query was provided, fetch tasks accordingly
     let tasksFetched = null;
