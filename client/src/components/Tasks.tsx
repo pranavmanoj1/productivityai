@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, CheckCircle, Circle, Calendar, Clock, Trash2 } from 'lucide-react';
+import { Plus, CheckCircle, Circle, Calendar, Clock, Trash2, Edit2, X, Check } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { format, parseISO } from 'date-fns';
 import CalendarView from './CalendarView';
@@ -24,6 +24,11 @@ const Tasks = () => {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [loading, setLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [editingTask, setEditingTask] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editPriority, setEditPriority] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editTime, setEditTime] = useState('');
 
   useEffect(() => {
     fetchTasks();
@@ -36,7 +41,6 @@ const Tasks = () => {
       } = await supabase.auth.getUser();
 
       if (!user) {
-        // Optionally, handle the case where no user is logged in.
         setTasks([]);
         return;
       }
@@ -53,6 +57,50 @@ const Tasks = () => {
       console.error('Error fetching tasks:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const startEditing = (task: Task) => {
+    setEditingTask(task.id);
+    setEditTitle(task.title);
+    setEditPriority(task.priority);
+    setEditDate(task.due_date || '');
+    setEditTime(task.due_time || '');
+  };
+
+  const cancelEditing = () => {
+    setEditingTask(null);
+    setEditTitle('');
+    setEditPriority('');
+    setEditDate('');
+    setEditTime('');
+  };
+
+  const saveEdit = async (taskId: string) => {
+    try {
+      const updates = {
+        title: editTitle,
+        priority: editPriority,
+        due_date: editDate || null,
+        due_time: editTime || null,
+      };
+
+      const { error } = await supabase
+        .from('tasks')
+        .update(updates)
+        .eq('id', taskId);
+
+      if (error) throw error;
+
+      setTasks(tasks.map(task =>
+        task.id === taskId
+          ? { ...task, ...updates }
+          : task
+      ));
+
+      cancelEditing();
+    } catch (error) {
+      console.error('Error updating task:', error);
     }
   };
 
@@ -269,65 +317,126 @@ const Tasks = () => {
                     task.completed ? 'bg-gray-50' : 'bg-white border border-gray-200'
                   }`}
                 >
-                  <button
-                    onClick={() => toggleTask(task.id)}
-                    className="mr-3 text-gray-400 hover:text-blue-500"
-                  >
-                    {task.completed ? (
-                      <CheckCircle className="w-5 h-5 text-green-500" />
-                    ) : (
-                      <Circle className="w-5 h-5" />
-                    )}
-                  </button>
-                  <div className="flex-1">
-                    <p
-                      className={`font-medium ${
-                        task.completed ? 'text-gray-500 line-through' : 'text-gray-800'
-                      }`}
-                    >
-                      {task.title}
-                    </p>
-                    {(task.due_date || task.due_time) && (
-                      <p className="text-sm text-gray-500">
-                        {formatDateTime(task.due_date, task.due_time)}
-                      </p>
-                    )}
-                    <span
-                      className={`inline-block px-2 py-1 text-xs font-medium rounded-full ${
-                        task.priority === 'high'
-                          ? 'bg-red-100 text-red-800'
-                          : task.priority === 'low'
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}
-                    >
-                      {task.priority}
-                    </span>
-                  </div>
-                  
-                  {deleteConfirm === task.id ? (
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={() => deleteTask(task.id)}
-                        className="px-2 py-1 text-xs font-medium text-white bg-red-600 rounded hover:bg-red-700"
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        onClick={() => setDeleteConfirm(null)}
-                        className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
-                      >
-                        Cancel
-                      </button>
+                  {editingTask === task.id ? (
+                    <div className="flex-1 space-y-3">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="text"
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          className="flex-1 border border-gray-300 rounded-md px-3 py-1 focus:outline-none focus:ring focus:border-blue-300"
+                        />
+                        <select
+                          value={editPriority}
+                          onChange={(e) => setEditPriority(e.target.value)}
+                          className="border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring focus:border-blue-300"
+                        >
+                          <option value="high">High</option>
+                          <option value="medium">Medium</option>
+                          <option value="low">Low</option>
+                        </select>
+                      </div>
+                      <div className="flex space-x-2">
+                        <input
+                          type="date"
+                          value={editDate}
+                          onChange={(e) => setEditDate(e.target.value)}
+                          className="border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring focus:border-blue-300"
+                        />
+                        <input
+                          type="time"
+                          value={editTime}
+                          onChange={(e) => setEditTime(e.target.value)}
+                          className="border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring focus:border-blue-300"
+                        />
+                      </div>
+                      <div className="flex justify-end space-x-2">
+                        <button
+                          onClick={() => saveEdit(task.id)}
+                          className="flex items-center px-2 py-1 text-sm text-green-600 hover:text-green-700"
+                        >
+                          <Check className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={cancelEditing}
+                          className="flex items-center px-2 py-1 text-sm text-gray-600 hover:text-gray-700"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => setDeleteConfirm(task.id)}
-                      className="ml-2 text-gray-400 hover:text-red-500"
-                      aria-label="Delete task"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <>
+                      <button
+                        onClick={() => toggleTask(task.id)}
+                        className="mr-3 text-gray-400 hover:text-blue-500"
+                      >
+                        {task.completed ? (
+                          <CheckCircle className="w-5 h-5 text-green-500" />
+                        ) : (
+                          <Circle className="w-5 h-5" />
+                        )}
+                      </button>
+                      <div className="flex-1">
+                        <p
+                          className={`font-medium ${
+                            task.completed ? 'text-gray-500 line-through' : 'text-gray-800'
+                          }`}
+                        >
+                          {task.title}
+                        </p>
+                        {(task.due_date || task.due_time) && (
+                          <p className="text-sm text-gray-500">
+                            {formatDateTime(task.due_date, task.due_time)}
+                          </p>
+                        )}
+                        <span
+                          className={`inline-block px-2 py-1 text-xs font-medium rounded-full ${
+                            task.priority === 'high'
+                              ? 'bg-red-100 text-red-800'
+                              : task.priority === 'low'
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-yellow-100 text-yellow-800'
+                          }`}
+                        >
+                          {task.priority}
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => startEditing(task)}
+                          className="text-gray-400 hover:text-blue-500"
+                          aria-label="Edit task"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        {deleteConfirm === task.id ? (
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => deleteTask(task.id)}
+                              className="px-2 py-1 text-xs font-medium text-white bg-red-600 rounded hover:bg-red-700"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              onClick={() => setDeleteConfirm(null)}
+                              className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setDeleteConfirm(task.id)}
+                            className="text-gray-400 hover:text-red-500"
+                            aria-label="Delete task"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
               ))

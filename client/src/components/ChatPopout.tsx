@@ -1,14 +1,13 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import Chat from './Chat';
-import '../index.css'; // Import the CSS directly
+import { ChatProvider } from './ChatContext';
+import Chat from './chat/Chat';
 
-// Create a function to mount the Chat component in the popout window
-export function mountChatInPopout(containerElement: HTMLElement) {
-  const root = createRoot(containerElement);
+export const mountChatInPopout = (container: HTMLElement) => {
+  const root = createRoot(container);
   root.render(
-    <React.StrictMode>
-      <Chat isPopout={true} />
-    </React.StrictMode>
+    <ChatProvider>
+      <Chat />
+    </ChatProvider>
   );
-}
+};
