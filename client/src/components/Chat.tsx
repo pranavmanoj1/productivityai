@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Phone, PhoneOff, Mic, MicOff, Clock } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, Clock, CheckCircle, Circle, Calendar, XCircle } from 'lucide-react';
 import axios from 'axios';
 import { supabase } from '../lib/supabase';
 
@@ -8,6 +8,15 @@ interface Message {
   type: 'user' | 'ai';
   content: string;
   timestamp: string;
+}
+
+interface Task {
+  title: string;
+  due_date: string | null;
+  priority: string;
+  due_time: string | null;
+  user_id: string;
+  completed: boolean;
 }
 
 interface ChatTranscriptProps {
@@ -40,6 +49,91 @@ const ChatTranscript: React.FC<ChatTranscriptProps> = ({ messages }) => {
   );
 };
 
+// Task component to match the style in Tasks.tsx
+const TaskItem: React.FC<{ task: Task }> = ({ task }) => {
+  const formatDateTime = (date: string | null, time: string | null) => {
+    if (!date && !time) return '';
+    
+    let formattedDate = '';
+    if (date) {
+      try {
+        // Format date nicely if it's valid
+        const dateObj = new Date(date);
+        formattedDate = dateObj.toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+      } catch (e) {
+        formattedDate = date;
+      }
+    }
+    
+    return `due on ${formattedDate}${time ? ` at ${time}` : ''}`;
+  };
+
+  return (
+    <div className="flex items-center p-3 rounded-lg bg-white border border-gray-200">
+      <div className="mr-3 text-gray-400">
+        <Circle className="w-5 h-5" />
+      </div>
+      <div className="flex-1">
+        <p className="font-medium text-gray-800">{task.title}</p>
+        {(task.due_date || task.due_time) && (
+          <p className="text-sm text-gray-500">
+            {formatDateTime(task.due_date, task.due_time)}
+          </p>
+        )}
+        <span
+          className={`inline-block px-2 py-1 text-xs font-medium rounded-full ${
+            task.priority === 'high'
+              ? 'bg-red-100 text-red-800'
+              : task.priority === 'low'
+              ? 'bg-green-100 text-green-800'
+              : 'bg-yellow-100 text-yellow-800'
+          }`}
+        >
+          {task.priority}
+        </span>
+      </div>
+    </div>
+  );
+};
+
+// Task approval component
+const TaskApproval: React.FC<{ 
+  tasks: Task[], 
+  onApprove: () => void, 
+  onCancel: () => void 
+}> = ({ tasks, onApprove, onCancel }) => {
+  return (
+    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="text-lg font-semibold text-gray-800">Proposed Tasks</h3>
+        <div className="space-x-2">
+          <button
+            onClick={onCancel}
+            className="px-3 py-1 text-sm font-medium text-gray-600 bg-gray-200 rounded-md hover:bg-gray-300"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onApprove}
+            className="px-3 py-1 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+          >
+            Approve All
+          </button>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {tasks.map((task, index) => (
+          <TaskItem key={index} task={task} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const Chat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isOnCall, setIsOnCall] = useState(false);
@@ -48,6 +142,7 @@ const Chat: React.FC = () => {
   const [callDuration, setCallDuration] = useState(0);
   const recognitionRef = useRef<any>(null);
   const callTimerRef = useRef<number>();
+  const [proposedTasks, setProposedTasks] = useState<Task[]>([]);
 
   // TTS State
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
@@ -127,7 +222,7 @@ const Chat: React.FC = () => {
     setIsSpeaking(true);
     try {
       const response = await axios.post(
-        'https://productivityai.onrender.com/api/tts',
+        'http://localhost:5001/api/tts',
         { text: message },
         { responseType: 'arraybuffer' }
       );
@@ -221,11 +316,13 @@ const Chat: React.FC = () => {
           throw new Error("User not authenticated");
         }
         const token = session.access_token;
-        const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
+        const response = await axios.post('http://localhost:5001/api/ai-response', {
           message: transcript
         }, { headers: { Authorization: `Bearer ${token}` } });
 
         addMessage(response.data.freeform_answer, 'ai');
+        
+        // Process fetched tasks
         if (response.data.tasks_fetched && response.data.tasks_fetched.length > 0) {
           const tasksList = response.data.tasks_fetched
             .map(task => `${task.title}`)
@@ -235,6 +332,14 @@ const Chat: React.FC = () => {
         if (response.data.tasks_fetched && response.data.tasks_fetched.length === 0) {
           addMessage(`You have no tasks scheduled for the given time period.`, 'ai');
         }
+        
+        // Process proposed tasks
+        if (response.data.proposed_tasks && response.data.proposed_tasks.length > 0) {
+          setProposedTasks(response.data.proposed_tasks);
+          addMessage(`I've proposed some tasks based on your input. Please review and approve them.`, 'ai');
+        }
+        
+        // Handle check-in timing
         if (response.data.check_in_delay && typeof response.data.check_in_delay === 'number') {
           scheduleCheckIn(response.data.check_in_delay);
         }
@@ -275,11 +380,13 @@ const Chat: React.FC = () => {
         throw new Error("User not authenticated");
       }
       const token = session.access_token;
-      const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
+      const response = await axios.post('http://localhost:5001/api/ai-response', {
         message: textMessage
       }, { headers: { Authorization: `Bearer ${token}` } });
 
       addMessage(response.data.freeform_answer, 'ai');
+      
+      // Process fetched tasks
       if (response.data.tasks_fetched && response.data.tasks_fetched.length > 0) {
         const tasksList = response.data.tasks_fetched
           .map(task => `${task.title}`)
@@ -289,6 +396,14 @@ const Chat: React.FC = () => {
       if (response.data.tasks_fetched && response.data.tasks_fetched.length === 0) {
         addMessage(`You have no tasks scheduled for the given time period.`, 'ai');
       }
+      
+      // Process proposed tasks
+      if (response.data.proposed_tasks && response.data.proposed_tasks.length > 0) {
+        setProposedTasks(response.data.proposed_tasks);
+        addMessage(`I've proposed some tasks based on your input. Please review and approve them.`, 'ai');
+      }
+      
+      // Handle check-in timing
       if (response.data.check_in_delay && typeof response.data.check_in_delay === 'number') {
         scheduleCheckIn(response.data.check_in_delay);
       }
@@ -297,6 +412,46 @@ const Chat: React.FC = () => {
       addMessage("I'm having trouble processing your request.", 'ai');
     }
     setTextMessage('');
+  };
+
+  // Handle confirming tasks
+  const handleConfirmTasks = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error("User not authenticated");
+      }
+      
+      const token = session.access_token;
+      const response = await axios.post(
+        "/api/confirm-tasks", 
+        { tasksToConfirm: proposedTasks },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      // Play TTS if available
+      if (response.data.tts_audio) {
+        const audioBlob = new Blob(
+          [Buffer.from(response.data.tts_audio, 'base64')], 
+          { type: 'audio/mpeg' }
+        );
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        audio.play();
+      }
+      
+      addMessage("Tasks have been added successfully!", 'ai');
+      setProposedTasks([]);
+    } catch (err) {
+      console.error("Error confirming tasks:", err);
+      addMessage("There was an error adding your tasks. Please try again.", 'ai');
+    }
+  };
+
+  // Handle canceling proposed tasks
+  const handleCancelTasks = () => {
+    setProposedTasks([]);
+    addMessage("Tasks have been discarded. Is there anything else you'd like me to help with?", 'ai');
   };
 
   return (
@@ -343,6 +498,17 @@ const Chat: React.FC = () => {
       {nextCheckInTime && (
         <div className="bg-yellow-100 p-2 text-center text-gray-800">
           Next check in: {formatDuration(checkInCountdown)}
+        </div>
+      )}
+
+      {/* Proposed Tasks Display */}
+      {proposedTasks.length > 0 && (
+        <div className="px-4 pt-4">
+          <TaskApproval 
+            tasks={proposedTasks} 
+            onApprove={handleConfirmTasks} 
+            onCancel={handleCancelTasks} 
+          />
         </div>
       )}
 

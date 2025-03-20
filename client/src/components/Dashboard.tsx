@@ -167,7 +167,7 @@ const Dashboard = () => {
       
       // Call the AI insights API
       const response = await axios.post(
-        'https://productivityai.onrender.com/api/ai-response',
+        'http://localhost:5001/api/ai-response',
         { message: "Give me productivity insights based on my tasks" },
         { 
           headers: { 
