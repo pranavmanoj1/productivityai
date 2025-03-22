@@ -16,12 +16,9 @@ app.use(cors());
 app.use(express.json());
 
 const userConversations = {};
-const STREAM_API_KEY = process.env.STREAM_VIDEO_API_KEY;
-const STREAM_API_SECRET = process.env.STREAM_VIDEO_API_SECRET;
 
-const client = new StreamClient(STREAM_API_KEY, STREAM_API_SECRET, {
-  timeout: 3000, // optional, default is 3000ms
-});
+
+
 
 
 
