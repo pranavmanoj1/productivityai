@@ -7,6 +7,7 @@ const textToSpeech = require('@google-cloud/text-to-speech');
 const { createClient } = require('@supabase/supabase-js');
 const { fetchTasks } = require('./tasks');
 
+const { StreamClient } = require("@stream-io/node-sdk");
 // Create a Supabase client
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -15,6 +16,14 @@ app.use(cors());
 app.use(express.json());
 
 const userConversations = {};
+const STREAM_API_KEY = process.env.STREAM_VIDEO_API_KEY;
+const STREAM_API_SECRET = process.env.STREAM_VIDEO_API_SECRET;
+
+const client = new StreamClient(STREAM_API_KEY, STREAM_API_SECRET, {
+  timeout: 3000, // optional, default is 3000ms
+});
+
+
 
 app.get('/', (req, res) => {
   res.send("Server is running. POST to /api/ai-response or /api/tts, or GET /api/tasks.");
