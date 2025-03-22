@@ -49,7 +49,7 @@ export default function Meet() {
       const displayName = (user.user_metadata?.full_name as string) || 'No Name';
 
       // 3) Fetch a Stream Video token from your server
-      const response = await fetch('http://localhost:5001/api/get-stream-video-token', {
+      const response = await fetch('https://productivityai.onrender.com/api/get-stream-video-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
