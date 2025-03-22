@@ -211,7 +211,7 @@ const Tasks = () => {
   };
 
   if (loading) {
-    return <div className="p-8">Loading tasks...</div>;
+    return <div className="p-8">Wait a sec</div>;
   }
 
   return (

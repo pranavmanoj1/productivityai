@@ -11,12 +11,17 @@
   },
   "dependencies": {
     "@react-oauth/google": "^0.12.1",
+    "@stream-io/video-react-sdk": "^1.12.11",
     "@supabase/supabase-js": "^2.48.1",
     "@tailwindcss/vite": "^4.0.14",
+    "@tanstack/react-query": "^5.69.0",
     "axios": "^1.7.9",
+    "date-fns": "^4.1.0",
     "lucide-react": "^0.344.0",
     "react": "^18.3.1",
+    "react-big-calendar": "^1.18.0",
     "react-dom": "^18.3.1",
+    "react-hot-toast": "^2.5.2",
     "react-router-dom": "^7.3.0",
     "words-to-numbers": "^1.5.1"
   },

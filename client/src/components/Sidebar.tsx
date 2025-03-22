@@ -1,6 +1,7 @@
 import React from 'react';
 import { FileBarChart , Home, CheckCircle, MessageSquare, Settings, LogOut } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { Users } from 'lucide-react';
 
 interface SidebarProps {
   activeTab: string;
@@ -21,6 +22,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
     { id: 'dashboard', icon: Home, label: 'Dashboard' },
     { id: 'analytics', icon: FileBarChart, label: 'Analytics' },
     { id: 'tasks', icon: CheckCircle, label: 'Tasks' },
+    { id: 'meet', icon: Users, label: 'Meet' },
     { id: 'chat', icon: MessageSquare, label: 'Chum AI' },
   ];
 

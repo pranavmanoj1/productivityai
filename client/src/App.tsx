@@ -7,11 +7,13 @@ import Dashboard from './components/Dashboard';
 import Tasks from './components/Tasks';
 import Analytics from './components/Analytics';
 import Auth from './components/Auth';
+import Meet from './components/Meet';
 
 // Chat-related imports
 import { ChatProvider } from './components/ChatContext';
 import Chat from './components/chat/Chat';
 import { mountChatInPopout } from './components/ChatPopout';
+import FormSubmission from './components/FormSubmission';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -130,7 +132,7 @@ function App() {
           {activeTab === 'dashboard' && <Dashboard />}
           {activeTab === 'analytics' && <Analytics />}
           {activeTab === 'tasks' && <Tasks />}
-
+          {activeTab === 'meet' && <FormSubmission />}
           {/* Render Chat in the main window unless we've popped it out */}
           {activeTab === 'chat' && !isPopout && (
             <div className="relative h-full">
