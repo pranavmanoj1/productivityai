@@ -17,3 +17,5 @@ export interface Message {
   export interface ChatTranscriptProps {
     messages: Message[];
   }
+
+export type Priority = 'low' | 'medium' | 'high';

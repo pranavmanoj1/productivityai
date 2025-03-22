@@ -23,6 +23,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isListening, setIsListening] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
 
+  
   const addMessage = (content: string, type: 'user' | 'ai') => {
     const newMessage = {
       id: `${Date.now()}-${Math.random()}`,

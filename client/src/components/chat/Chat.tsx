@@ -7,6 +7,7 @@ import ChatTranscript from './ChatTranscript';
 import TaskApproval from './TaskApproval';
 import TextInput from './TextInput';
 import VoiceControls from './VoiceControl';
+import { Task } from '../types';
 
 
 const Chat: React.FC = () => {
@@ -38,6 +39,8 @@ const Chat: React.FC = () => {
     }, 1000);
     return () => clearInterval(clockInterval);
   }, []);
+
+  
 
   useEffect(() => {
     if (isOnCall) {
@@ -96,7 +99,7 @@ const Chat: React.FC = () => {
     setIsSpeaking(true);
     try {
       const response = await axios.post(
-        'http://localhost:5001/api/tts',
+        'https://productivityai.onrender.com/api/tts',
         { text: message },
         { responseType: 'arraybuffer' }
       );
@@ -174,7 +177,7 @@ const Chat: React.FC = () => {
           throw new Error("User not authenticated");
         }
         const token = session.access_token;
-        const response = await axios.post('http://localhost:5001/api/ai-response', {
+        const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
           message: transcript
         }, { headers: { Authorization: `Bearer ${token}` } });
 
@@ -230,14 +233,14 @@ const Chat: React.FC = () => {
 
   const handleTextSubmit = async (message: string) => {
     addMessage(message, 'user');
-    queueTTSMessage(message);
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         throw new Error("User not authenticated");
       }
       const token = session.access_token;
-      const response = await axios.post('http://localhost:5001/api/ai-response', {
+      const response = await axios.post('https://productivityai.onrender.com/api/ai-response', {
         message
       }, { headers: { Authorization: `Bearer ${token}` } });
 
@@ -281,20 +284,12 @@ const Chat: React.FC = () => {
       
       const token = session.access_token;
       const response = await axios.post(
-        "/api/confirm-tasks", 
+        "https://productivityai.onrender.com/api/confirm-tasks", 
         { tasksToConfirm: proposedTasks },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
-      if (response.data.tts_audio) {
-        const audioBlob = new Blob(
-          [Buffer.from(response.data.tts_audio, 'base64')], 
-          { type: 'audio/mpeg' }
-        );
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio(audioUrl);
-        audio.play();
-      }
+      
       
       addMessage("Tasks have been added successfully!", 'ai');
       queueTTSMessage("Tasks have been added successfully!");
@@ -312,6 +307,11 @@ const Chat: React.FC = () => {
     queueTTSMessage("Tasks have been discarded. Is there anything else you'd like me to help with?");
   };
 
+  const handleUpdateTask = (updatedTask: Task) => {
+    setProposedTasks((prevTasks) =>
+      prevTasks.map((task) => (task.title === updatedTask.title ? updatedTask : task))
+    );
+  };
   return (
     <div className="flex flex-col h-full bg-gray-50">
       <ChatHeader
@@ -332,8 +332,7 @@ const Chat: React.FC = () => {
           <TaskApproval
             tasks={proposedTasks}
             onApprove={handleConfirmTasks}
-            onCancel={handleCancelTasks}
-          />
+            onCancel={handleCancelTasks} onUpdateTask={handleUpdateTask}/>
         </div>
       )}
 
