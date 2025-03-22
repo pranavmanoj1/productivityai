@@ -80,7 +80,7 @@ Respond with a JSON object containing:
   "intent": one of ["task_creation", "task_query", "check_in", "general_chat"],
   "check_in_delay": number of milliseconds if specified (e.g. 300000 for 5 minutes) or null,
   "task_query_type": one of ["today", "thisWeek", "thisMonth", "priority", "dueDate", "dueTime"] or null,
-  "emotional_state": one of ["neutral", "stressed", "overwhelmed", "anxious", "positive"] 
+  "emotional_state": one of ["neutral", "stressed", "positive"] 
 }`
     },
     { role: "user", content: message }
@@ -242,7 +242,7 @@ app.post('/api/ai-response', async (req, res) => {
         if (inserted && inserted.length > 0) {
           try {
             const ttsResponse = await axios.post(
-              `http://localhost:5001/api/tts/`,
+              `https://productivityai.onrender.com/api/tts/`,
               { text: "Task added" },
               { responseType: 'arraybuffer' }
             );
@@ -313,7 +313,7 @@ app.post('/api/confirm-tasks', async (req, res) => {
     let ttsAudioBase64 = null;
     try {
       const ttsResponse = await axios.post(
-        `http://localhost:5001/api/tts/`,
+        `https://productivityai.onrender.com/api/tts/`,
         { text: "Tasks added successfully" },
         { responseType: 'arraybuffer' }
       );
