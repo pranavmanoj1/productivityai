@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   CallControls,
   CallingState,
@@ -10,45 +10,30 @@ import {
   useCallStateHooks,
   User,
 } from '@stream-io/video-react-sdk';
-
+import { Clock } from 'lucide-react';
 import '@stream-io/video-react-sdk/dist/css/styles.css';
 import './style.css';
-
-// Use your existing Supabase client
 import { supabase } from '../lib/supabase';
+import { UserList } from './UserList';
 
-// Replace with your Stream API key (do not expose your secret!)
 const apiKey = import.meta.env.VITE_API_KEY as string;
+const CALL_TIMEOUT = 25 * 60 * 1000; // 25 minutes in milliseconds
 
 export default function Meet() {
-  // State to store the initialized StreamVideoClient
   const [client, setClient] = useState<StreamVideoClient | null>(null);
-  // State to store the current call object
   const [currentCall, setCurrentCall] = useState<ReturnType<StreamVideoClient['call']> | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const initClient = async () => {
-      // 1) Fetch the current Supabase user
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
-
-      if (error) {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error || !user) {
         console.error('Error fetching Supabase user:', error);
         return;
       }
-      if (!user) {
-        console.warn('No Supabase user is logged in.');
-        return;
-      }
-
-      // 2) Extract the user's ID and display name
       const supabaseUserId = user.id;
       const displayName = (user.user_metadata?.full_name as string) || 'No Name';
 
-      // 3) Fetch a Stream Video token from your server
       const response = await fetch('https://productivityai-1.onrender.com/api/get-stream-video-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -59,23 +44,19 @@ export default function Meet() {
       });
       const { token } = await response.json();
 
-      // 4) Build the Stream Video user object
       const streamUser: User = {
         id: supabaseUserId,
         name: displayName,
       };
 
-      // 5) Initialize the StreamVideoClient using the server-generated token
       const newClient = new StreamVideoClient({
         apiKey,
         user: streamUser,
         token,
       });
 
-      // 6) Create a default placeholder call
+      // Create a placeholder call
       const placeholderCall = newClient.call('default', 'placeholder-id');
-
-      // 7) Store in state and mark loading as complete
       setClient(newClient);
       setCurrentCall(placeholderCall);
       setLoading(false);
@@ -84,9 +65,14 @@ export default function Meet() {
     initClient();
   }, []);
 
-  // Show a loading message if the client or call hasn't been initialized
   if (loading || !client || !currentCall) {
-    return <div>Loading or no logged-in user…</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-pulse text-lg font-medium text-gray-600">
+          Initializing video call...
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -103,26 +89,54 @@ type MyUILayoutProps = {
   currentCall: ReturnType<StreamVideoClient['call']>;
   onCallChange: (call: ReturnType<StreamVideoClient['call']> | null) => void;
 };
+
 export const MyUILayout = ({ client, currentCall, onCallChange }: MyUILayoutProps) => {
-  const { useCallCallingState } = useCallStateHooks();
+  const { useCallCallingState, useParticipantCount } = useCallStateHooks();
   const callingState = useCallCallingState();
+  const participantCount = useParticipantCount();
 
   const [availableUsers, setAvailableUsers] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const callTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Updates the current user's availability in Supabase.
+  const updateUserAvailability = useCallback(async (available: boolean) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await supabase
+        .from('availability')
+        .update({ available })
+        .eq('user_id', user.id);
+    }
+  }, []);
+
+  // Fetch and store the current user id.
   useEffect(() => {
+    const fetchCurrentUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setCurrentUserId(user.id);
+      }
+    };
+    fetchCurrentUser();
+  }, []);
+
+  // Fetch available users and filter out the current user.
+  useEffect(() => {
+    if (!currentUserId) return;
     const fetchAvailableUsers = async () => {
       try {
-        // 8) Query your "availability" table for available users
         const { data, error } = await supabase
           .from('availability')
           .select('*')
           .eq('available', true);
-
         if (error) {
-          console.error('Error fetching users from availability:', error);
+          console.error('Error fetching users:', error);
         } else {
-          setAvailableUsers(data || []);
+          // Remove the current user's record from the list.
+          const filtered = (data || []).filter((u: any) => u.user_id !== currentUserId);
+          setAvailableUsers(filtered);
         }
       } catch (err) {
         console.error('Unexpected error:', err);
@@ -132,62 +146,84 @@ export const MyUILayout = ({ client, currentCall, onCallChange }: MyUILayoutProp
     };
 
     fetchAvailableUsers();
-  }, []);
+    const interval = setInterval(fetchAvailableUsers, 10000);
+    return () => clearInterval(interval);
+  }, [currentUserId]);
 
-  // 9) When a user clicks "Call", create and join a new call for that user
-  const handleJoinCallWithUser = async (otherUserId: string) => {
+  // Monitor call state and participant count.
+  // Only when there are 2 or more participants, mark the current user as unavailable and set the auto-leave timer.
+  useEffect(() => {
+    if (callingState === CallingState.JOINED && participantCount >= 2) {
+      updateUserAvailability(false);
+      if (callTimerRef.current) {
+        clearTimeout(callTimerRef.current);
+      }
+      callTimerRef.current = setTimeout(async () => {
+        await currentCall.leave();
+        updateUserAvailability(true);
+      }, CALL_TIMEOUT);
+    }
+    return () => {
+      if (callTimerRef.current) {
+        clearTimeout(callTimerRef.current);
+      }
+    };
+  }, [callingState, participantCount, currentCall, updateUserAvailability]);
+
+  // When a user clicks on a call card, generate a consistent call id based on both users’ ids.
+  // Do not update availability until the second participant joins.
+  const handleJoinCallWithUser = async (targetUserId: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const callerId = user.id;
+    // Create a consistent call id by sorting the two user ids.
+    const sortedIds = [callerId, targetUserId].sort();
+    const callId = `call-${sortedIds[0].slice(0, 8)}-${sortedIds[1].slice(0, 8)}`;
+
     try {
-      // Build a unique call ID (you can customize this as needed)
-      const newCallId = `my-call-${otherUserId}`;
-
-      // Get a new call object from the existing client
-      const newCall = client.call('default', newCallId);
-
-      // Join (and create if not exists) the new call
+      const newCall = client.call('default', callId);
       await newCall.join({ create: true });
-
-      // Replace the placeholder call with the new call
       onCallChange(newCall);
     } catch (error) {
       console.error('Error joining call:', error);
     }
   };
 
-  // 10) If the call is not yet joined, display available users to call
+  // If not in a call, show available users list.
   if (callingState !== CallingState.JOINED) {
-    if (loadingUsers) {
-      return <div>Loading available users…</div>;
-    }
-
     return (
-      <div>
-        <h3>Users Available to Call</h3>
-        {availableUsers.length === 0 && <p>No users are currently available.</p>}
-
-        {availableUsers.map((u) => {
-          // Expecting 'user_id' from the "availability" table; use 'user_name' if available
-          const otherId = u.user_id;
-          const otherName = u.name || otherId;
-
-          return (
-            <div key={otherId} style={{ marginBottom: '1rem' }}>
-              <strong>{otherName}</strong>
-              <br />
-              <button onClick={() => handleJoinCallWithUser(otherId)}>
-                Call {otherName}
-              </button>
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-2xl mx-auto">
+          <div className="mb-8">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-gray-900">Available Users</h2>
+              <div className="flex items-center text-sm text-gray-500">
+                <Clock className="w-4 h-4 mr-1" />
+                <span>25 min limit per call</span>
+              </div>
             </div>
-          );
-        })}
+          </div>
+          <UserList
+            users={availableUsers}
+            onCallUser={handleJoinCallWithUser}
+            isLoading={loadingUsers}
+            currentUserId={currentUserId || undefined}
+          />
+        </div>
       </div>
     );
   }
 
-  // 11) Once joined, display the actual call UI with speaker layout and controls
+  // Once in a call, show the call UI.
   return (
     <StreamTheme>
-      <SpeakerLayout participantsBarPosition="bottom" />
-      <CallControls />
+      <div className="relative">
+        <SpeakerLayout participantsBarPosition="bottom" />
+        <CallControls />
+        <div className="absolute top-4 right-4 bg-black/50 text-white px-3 py-1 rounded-full text-sm">
+          Time remaining: 25:00
+        </div>
+      </div>
     </StreamTheme>
   );
 };
