@@ -26,14 +26,19 @@ export default function Meet() {
 
   useEffect(() => {
     const initClient = async () => {
-      const { data: { user }, error } = await supabase.auth.getUser();
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
       if (error || !user) {
         console.error('Error fetching Supabase user:', error);
         return;
       }
+
       const supabaseUserId = user.id;
       const displayName = (user.user_metadata?.full_name as string) || 'No Name';
 
+      // Fetch your Stream Video token from wherever your backend is.
       const response = await fetch('https://productivityai-1.onrender.com/api/get-stream-video-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -68,9 +73,7 @@ export default function Meet() {
   if (loading || !client || !currentCall) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-pulse text-lg font-medium text-gray-600">
-          Initializing video call...
-        </div>
+        <div className="animate-pulse text-lg font-medium text-gray-600">Initializing video call...</div>
       </div>
     );
   }
@@ -98,9 +101,14 @@ export const MyUILayout = ({ client, currentCall, onCallChange }: MyUILayoutProp
   const [availableUsers, setAvailableUsers] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  // 1) Local state for the toggle:
+  const [isToggleOn, setIsToggleOn] = useState(false);
+
+  // Timer ref for call auto-leave
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Updates the current user's availability in Supabase.
+  // Updates the current user's availability in Supabase
   const updateUserAvailability = useCallback(async (available: boolean) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
@@ -111,16 +119,36 @@ export const MyUILayout = ({ client, currentCall, onCallChange }: MyUILayoutProp
     }
   }, []);
 
-  // Fetch and store the current user id.
+  // 2) Fetch current user + fetch user’s saved availability from Supabase on mount
   useEffect(() => {
     const fetchCurrentUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (user) {
         setCurrentUserId(user.id);
+
+        // Fetch the user's current availability to reflect on toggle
+        const { data, error } = await supabase
+          .from('availability')
+          .select('available')
+          .eq('user_id', user.id)
+          .single();
+
+        if (!error && data?.available !== undefined) {
+          setIsToggleOn(data.available);
+        }
       }
     };
     fetchCurrentUser();
   }, []);
+
+  // 3) Handle the toggle's change and update Supabase
+  const handleToggleChange = async () => {
+    const newValue = !isToggleOn;
+    setIsToggleOn(newValue);
+    await updateUserAvailability(newValue);
+  };
 
   // Fetch available users and filter out the current user.
   useEffect(() => {
@@ -151,7 +179,7 @@ export const MyUILayout = ({ client, currentCall, onCallChange }: MyUILayoutProp
   }, [currentUserId]);
 
   // Monitor call state and participant count.
-  // Only when there are 2 or more participants, mark the current user as unavailable and set the auto-leave timer.
+  // Only when 2+ participants, mark the current user as unavailable and set the auto-leave timer.
   useEffect(() => {
     if (callingState === CallingState.JOINED && participantCount >= 2) {
       updateUserAvailability(false);
@@ -163,6 +191,7 @@ export const MyUILayout = ({ client, currentCall, onCallChange }: MyUILayoutProp
         updateUserAvailability(true);
       }, CALL_TIMEOUT);
     }
+
     return () => {
       if (callTimerRef.current) {
         clearTimeout(callTimerRef.current);
@@ -170,13 +199,14 @@ export const MyUILayout = ({ client, currentCall, onCallChange }: MyUILayoutProp
     };
   }, [callingState, participantCount, currentCall, updateUserAvailability]);
 
-  // When a user clicks on a call card, generate a consistent call id based on both users’ ids.
-  // Do not update availability until the second participant joins.
+  // When a user clicks on a call card, generate a call ID from both user IDs
   const handleJoinCallWithUser = async (targetUserId: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) return;
+
     const callerId = user.id;
-    // Create a consistent call id by sorting the two user ids.
     const sortedIds = [callerId, targetUserId].sort();
     const callId = `call-${sortedIds[0].slice(0, 8)}-${sortedIds[1].slice(0, 8)}`;
 
@@ -189,7 +219,7 @@ export const MyUILayout = ({ client, currentCall, onCallChange }: MyUILayoutProp
     }
   };
 
-  // If not in a call, show available users list.
+  // If not in a call, show available users + the toggle at the top
   if (callingState !== CallingState.JOINED) {
     return (
       <div className="min-h-screen bg-gray-50 p-8">
@@ -202,7 +232,28 @@ export const MyUILayout = ({ client, currentCall, onCallChange }: MyUILayoutProp
                 <span>25 min limit per call</span>
               </div>
             </div>
+
+            {/* 4) The toggle UI */}
+            <div className="mt-4">
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={isToggleOn}
+                  onChange={handleToggleChange}
+                />
+                <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-focus:outline-none peer-checked:bg-blue-600 transition-all relative">
+                  <div
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all ${
+                      isToggleOn ? 'translate-x-5' : ''
+                    }`}
+                  />
+                </div>
+                <span className="ml-3 text-sm text-gray-900">I’m Available</span>
+              </label>
+            </div>
           </div>
+
           <UserList
             users={availableUsers}
             onCallUser={handleJoinCallWithUser}
@@ -214,7 +265,7 @@ export const MyUILayout = ({ client, currentCall, onCallChange }: MyUILayoutProp
     );
   }
 
-  // Once in a call, show the call UI.
+  // Otherwise, show call UI
   return (
     <StreamTheme>
       <div className="relative">
